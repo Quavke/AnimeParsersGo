@@ -18,8 +18,9 @@ type Client struct {
 }
 
 type AniboomParser struct {
-	dmn    string
-	Client *Client
+	dmn     string
+	Client  *Client
+	context context.Context
 }
 
 func NewAniboomParser(mirror string) *AniboomParser {
@@ -42,37 +43,68 @@ type FastSearchResult struct {
 	Title      string `json:"title"`
 	Year       string `json:"year"`
 	OtherTitle string `json:"other_title"`
-	AnimeType  string `json:"type"`
+	Type       string `json:"type"`
 	Link       string `json:"link"`
 	AnimegoID  string `json:"animego_id"`
 }
 
-//Быстрый поиск через animego.me
+type EpisodeInfo struct {
+	Num    string `json:"num"`
+	Title  string `json:"title"`
+	Date   string `json:"date"`
+	Status string `json:"status"`
+}
 
-//:title: Название аниме
+type Translation struct {
+	Name           string `json:"name"`
+	TranslationsID string `json:"translation_id"`
+}
 
-// Возвращает список словарей в виде:
-// [
-//
-//	{
-//	'title': Название аниме
-//	'year': Год выпуска
-//	'other_title': Другое название (оригинальное название)
-//	'type': Тип аниме (ТВ сериал, фильм, ...)
-//	'link': Ссылка на страницу с информацией
-//	'animego_id': id на анимего (по сути в ссылке на страницу с информацией последняя цифра и есть id)
-//	},
-//
-// ...
-// ]
-func (ab AniboomParser) Fast_search(ctx context.Context, title string) ([]*FastSearchResult, error) {
+type OtherAnimeInfo struct {
+	AgeRests       string   `json:"age_restrictions"`
+	ReleaseDate    string   `json:"release_date"`
+	MainCharacters []string `json:"main_characters"`
+	Duration       string   `json:"duration"`
+	OriginalSource string   `json:"original_source"`
+	MPAARating     string   `json:"mpaa_rating"`
+	Season         string   `json:"season"`
+	OriginalRanobe string   `json:"ranobe"`
+	OriginalManga  string   `json:"manga"`
+	Studio         string   `json:"studio"`
+}
+type SearchResult struct {
+	Title        string           `json:"title"`
+	OtherTitle   string           `json:"other_title"`
+	Status       string           `json:"status"`
+	Type         string           `json:"type"`
+	Genres       []string         `json:"genres"`
+	Description  string           `json:"description"`
+	Episodes     string           `json:"episodes"`
+	EpisodesInfo []EpisodeInfo    `json:"episodes_info"`
+	Translations []Translation    `json:"translations"`
+	PosterURL    string           `json:"poster_url"`
+	Trailer      string           `json:"trailer"`
+	Screenshots  []string         `json:"screenshots"`
+	OtherInfo    []OtherAnimeInfo `json:"other_info"`
+	Link         string           `json:"link"`
+	AnimegoID    string           `json:"animego_id"`
+}
+
+/*
+Быстрый поиск через animego.me
+
+:title: Название аниме
+
+Возвращает массив из ссылок на модель FastSearchResult
+*/
+func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	params := url.Values{}
 
 	params.Set("type", "small")
 	params.Set("q", title)
-	domain := fmt.Sprintf("https://%s", ab.dmn)
-	url := fmt.Sprintf("/%ssearch/all?%s", domain, params.Encode())
-	request, err := http.NewRequestWithContext(ctx, "get", url, nil)
+	domain := fmt.Sprintf("https://%s/", ab.dmn)
+	url := fmt.Sprintf("%ssearch/all?%s", domain, params.Encode())
+	request, err := http.NewRequestWithContext(ab.context, "get", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -83,20 +115,20 @@ func (ab AniboomParser) Fast_search(ctx context.Context, title string) ([]*FastS
 
 	resp, err := ab.Client.httpClient.Do(request)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Aniboom parser: http клиент не смог выполнить запрос, код %d. Ошибка: %v", resp.StatusCode, err)
+		log.Printf("Aniboom parser : FastSearch : http клиент не смог выполнить запрос, код %d. Ошибка: %v", resp.StatusCode, err)
 		return nil, parsers_errors.ServiceError
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		log.Printf("Aniboom parser: goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Printf("Aniboom parser : FastSearch : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
 		return nil, parsers_errors.ServiceError
 	}
 	res := make([]*FastSearchResult, 0)
 	items := doc.Find("div.result-search-anime").First().Find("div.result-search-item")
 
 	if items.Length() == 0 {
-		log.Printf("Aniboom parser: в контейнере result-search-anime не найдено ни одного элемента div.result-search-item")
+		log.Printf("Aniboom parser : FastSearch : в контейнере result-search-anime не найдено ни одного элемента div.result-search-item")
 		return nil, parsers_errors.NoResults
 	}
 
@@ -105,7 +137,7 @@ func (ab AniboomParser) Fast_search(ctx context.Context, title string) ([]*FastS
 		c_data.Title = strings.TrimSpace(s.Find("h5").First().Text())
 		c_data.Year = strings.TrimSpace(s.Find("span.anime-year").First().Text())
 		c_data.OtherTitle = s.Find("div.text-truncate").First().Text()
-		c_data.AnimeType = s.Find("a[href*=\"anime/type\"]").First().Text()
+		c_data.Type = s.Find("a[href*=\"anime/type\"]").First().Text()
 		link := s.Find("h5 a").First()
 		var rawLink string
 		if link.Length() > 0 {
@@ -114,72 +146,88 @@ func (ab AniboomParser) Fast_search(ctx context.Context, title string) ([]*FastS
 				rawLink = href
 			}
 		}
-		c_data.Link = domain + rawLink
+		c_data.Link = fmt.Sprintf("https:%s", ab.dmn) + rawLink
 		fullLink := c_data.Link
-		var animego_id string
 		lastDashIndex := strings.LastIndex(fullLink, "-")
 		if lastDashIndex != -1 && lastDashIndex < len(fullLink)-1 {
-			animego_id = fullLink[lastDashIndex+1:]
+			c_data.AnimegoID = fullLink[lastDashIndex+1:]
 		} else {
-			animego_id = ""
+			c_data.AnimegoID = ""
 		}
-		c_data.AnimegoID = animego_id
 		res = append(res, c_data)
 	})
 
 	return res, nil
 }
 
-// Расширенный поиск через animego.me. Собирает дополнительные данные об аниме.
+/*
+Расширенный поиск через animego.me. Собирает дополнительные данные об аниме.
 
-// :title: Название
+:title: Название
 
-// Возвращает список из словарей:
-// [
-//
-//	{
-//	    'title': Название
-//	    'other_titles': [Альтернативное название 1, ...]
-//	    'status': Статус аниме (онгоинг, анонс, вышел, ...)
-//	    'type': Тип аниме (ТВ сериал, фильм, ...)
-//	    'genres': [Список жанров]
-//	    'description': описание
-//	    'episodes': если аниме вышло, то количество серий, если еще идет, то "вышло / всего"
-//	    'episodes_info': [
-//	        {
-//	            'num': Номер эпизода
-//	            'title': Название эпизода
-//	            'date': Даты выхода (предполагаемые если анонс)
-//	            'status': 'вышло' или 'анонс' (Имеется в виду вышло в оригинале, не переведено)
-//	        },
-//	        ...
-//	    ],
-//	    'translations': [
-//	        {
-//	            'name': Название студии,
-//	            'translation_id': id перевода в плеере aniboom
-//	        },
-//	        ...
-//	    ],
-//	    'poster_url': Ссылка на постер аниме
-//	    'trailer': Ссылка на ютуб embed трейлер
-//	    'screenshots': [Список ссылок на скриншоты]
-//	    'other_info': {
-//	        Данная информация может меняться в зависимости от типа или состояния тайтла
-//	        'Возрастные ограничения': (прим: 16+)
-//	        'Выпуск': (прим: с 2 апреля 2024)
-//	        'Главные герои': [Список главных героев]
-//	        'Длительность': (прим: 23 мин. ~ серия)
-//	        'Первоисточник': (прим: Легкая новела)
-//	        'Рейтинг MPAA': (прим: PG-13),
-//	        'Сезон': (прим. Весна 2024),
-//	        'Снят по ранобэ': название ранобэ (Или так же может быть 'Снят по манге')
-//	        'Студия': название студии
-//	    }
-//	    'link': Ссылка на страницу с информацией
-//	    'animego_id': id на анимего (по сути в ссылке на страницу с информацией последняя цифра и есть id)
-//	},
-//	...
-//
-// ]
-func (ab AniboomParser) search(title string) SearchResult
+Возвращает массив из ссылок на SearchResult
+*/
+func (ab *AniboomParser) Search(title string) ([]*SearchResult, error) {
+	elements, err := ab.FastSearch(title)
+	if err != nil {
+		log.Printf("Aniboom parser : search : FastSearch не смог найти данные для title %s. Ошибка: %v", title, err)
+		return nil, err
+	}
+	res := make([]*SearchResult, 0)
+	for _, anime := range elements {
+		c_data, err := ab.AnimeInfo(anime.Link)
+		if err != nil {
+			log.Printf("Aniboom parser : search : AnimeInfo не смог найти данные для %s по ссылке %s. Ошибка: %v", anime.Title, anime.Link, err)
+			continue
+		}
+		res = append(res, c_data)
+	}
+
+	return res, nil
+}
+
+/*
+Получение данных об аниме с его страницы на animego.me.
+
+:link: Ссылка на страницу (прим: https:animego.me/anime/volchica-i-pryanosti-torgovec-vstrechaet-mudruyu-volchicu-2546)
+
+Возвращает модель SearchResult
+*/
+func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
+	var c_data SearchResult
+
+	request, err := http.NewRequestWithContext(ab.context, "get", link, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
+
+	request.Header.Set("Referer", url)
+
+	resp, err := ab.Client.httpClient.Do(request)
+	if err != nil {
+		log.Printf("Aniboom parser : AnimeInfo : http клиент не смог выполнить запрос, код: %d. Ошибка: %v", resp.StatusCode, err)
+		return nil, parsers_errors.ServiceError
+	} else if resp.StatusCode == http.StatusTooManyRequests {
+		log.Println("Aniboom parser : AnimeInfo : Сервер вернул код ошибки 429. Слишком частые запросы")
+		return nil, parsers_errors.TooManyRequests
+	} else if resp.StatusCode != http.StatusOK {
+		log.Printf("Aniboom parser : AnimeInfo : Сервер не вернул ожидаемый код 200. Код: %d\n", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		log.Printf("Aniboom parser : FastSearch : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		return nil, parsers_errors.ServiceError
+	}
+	c_data.Link = link
+	fullLink := c_data.Link
+	lastDashIndex := strings.LastIndex(fullLink, "-")
+	if lastDashIndex != -1 && lastDashIndex < len(fullLink)-1 {
+		c_data.AnimegoID = fullLink[lastDashIndex+1:]
+	} else {
+		c_data.AnimegoID = ""
+	}
+	c_data.Title = strings.TrimSpace(doc.Find("div.anime-title h1").Text())
+	return &c_data, nil
+}
