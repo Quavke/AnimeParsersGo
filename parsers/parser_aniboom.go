@@ -217,7 +217,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 	}
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		log.Printf("Aniboom parser : FastSearch : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Printf("Aniboom parser : AnimeInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
 		return nil, parsers_errors.ServiceError
 	}
 	c_data.Link = link
@@ -229,5 +229,69 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 		c_data.AnimegoID = ""
 	}
 	c_data.Title = strings.TrimSpace(doc.Find("div.anime-title h1").Text())
+	poster_url_doc := doc.Find("img").First()
+	if poster_url_doc.Length() > 0 {
+		src, exists := poster_url_doc.Attr("src")
+		if exists {
+			c_data.PosterURL = src
+			dmn := fmt.Sprintf("https://%s", ab.dmn)
+			SlashIndex := strings.Index(c_data.PosterURL, "/upload")
+			if SlashIndex != -1 && SlashIndex < len(c_data.PosterURL)-1 {
+				c_data.PosterURL = c_data.PosterURL[SlashIndex+1:]
+			} else {
+				c_data.PosterURL = ""
+			}
+			if len(c_data.PosterURL) > 0 {
+				c_data.PosterURL = dmn + c_data.PosterURL
+			}
+		}
+	}
+	anime_info := doc.Find("div.anime-info dl").First()
+	if anime_info.Length() == 0 {
+		log.Printf("Aniboom parser : AnimeInfo : doc.Find(\"div.anime-info dl\") не смог найти тег dl")
+		return nil, parsers_errors.NoResults
+	}
+	var allDTs []*goquery.Selection
+	var allDDs []*goquery.Selection
+
+	anime_info.Find("dt").Each(func(i int, s *goquery.Selection) {
+		allDTs = append(allDTs, s)
+	})
+
+	anime_info.Find("dd").Each(func(i int, s *goquery.Selection) {
+		skip := false
+
+		if s.HasClass("mt-2") && s.HasClass("col-12") {
+			skip = true
+		}
+
+		if s.Find("hr").First().Length() > 0 {
+			skip = true
+		}
+
+		if !skip {
+			allDDs = append(allDDs, s)
+		}
+	})
+	other_anime_info := make(map[string]string, 0)
+
+	minLen := len(allDTs)
+	if minLen > len(allDDs) {
+		minLen = len(allDDs)
+	}
+
+	for i := 0; i < minLen; i++ {
+		key := strings.TrimSpace(allDTs[i].Text())
+		value := strings.TrimSpace(allDDs[i].Text())
+
+		if key != "" && value != "" {
+			other_anime_info[key] = value
+		}
+	}
+
+	for key, value := range other_anime_info {
+
+	}
+
 	return &c_data, nil
 }
