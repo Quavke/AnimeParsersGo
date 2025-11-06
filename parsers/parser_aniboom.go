@@ -2,15 +2,18 @@ package parsers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	parsers_errors "github.com/Quavke/AnimeParsersGo/errors"
+	perrors "github.com/Quavke/AnimeParsersGo/errors"
 )
 
 type Client struct {
@@ -56,8 +59,8 @@ type EpisodeInfo struct {
 }
 
 type Translation struct {
-	Name           string `json:"name"`
-	TranslationsID string `json:"translation_id"`
+	Name          string `json:"name"`
+	TranslationID string `json:"translation_id"`
 }
 
 type OtherAnimeInfo struct {
@@ -80,8 +83,8 @@ type SearchResult struct {
 	Genres       []string          `json:"genres"`
 	Description  string            `json:"description"`
 	Episodes     string            `json:"episodes"`
-	EpisodesInfo []EpisodeInfo     `json:"episodes_info"`
-	Translations []Translation     `json:"translations"`
+	EpisodesInfo []*EpisodeInfo    `json:"episodes_info"`
+	Translations []*Translation    `json:"translations"`
 	PosterURL    string            `json:"poster_url"`
 	Trailer      string            `json:"trailer"`
 	Screenshots  []string          `json:"screenshots"`
@@ -96,7 +99,7 @@ type SearchResult struct {
 
 :title: Название аниме
 
-Возвращает массив из ссылок на модель FastSearchResult
+Возвращает срез ссылок на FastSearchResult
 */
 func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	params := url.Values{}
@@ -104,10 +107,12 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	params.Set("type", "small")
 	params.Set("q", title)
 	domain := fmt.Sprintf("https://%s/", ab.dmn)
-	url := fmt.Sprintf("%ssearch/all?%s", domain, params.Encode())
-	request, err := http.NewRequestWithContext(ab.context, "get", url, nil)
+	URL := fmt.Sprintf("%ssearch/all?%s", domain, params.Encode())
+	request, err := http.NewRequestWithContext(ab.context, "get", URL, nil)
 	if err != nil {
-		return nil, err
+		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : не смог создать request. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	}
 
 	request.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
@@ -116,21 +121,25 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 
 	resp, err := ab.Client.httpClient.Do(request)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Aniboom parser error : FastSearch : http клиент не смог выполнить запрос, код %d. Ошибка: %v", resp.StatusCode, err)
-		return nil, parsers_errors.ServiceError
+		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : http клиент не смог выполнить запрос, код %d. Ошибка: %v", resp.StatusCode, err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	}
+	defer resp.Body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		log.Printf("Aniboom parser error : FastSearch : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
-		return nil, parsers_errors.ServiceError
+		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	}
 	res := make([]*FastSearchResult, 0)
 	items := doc.Find("div.result-search-anime").First().Find("div.result-search-item")
 
 	if items.Length() == 0 {
-		log.Printf("Aniboom parser error : FastSearch : в контейнере result-search-anime не найдено ни одного элемента div.result-search-item")
-		return nil, parsers_errors.NoResults
+		error_message := "Aniboom parser error : FastSearch : в контейнере result-search-anime не найдено ни одного элемента div.result-search-item"
+		log.Println(error_message)
+		return nil, perrors.NewNoResultsError(error_message)
 	}
 
 	items.Each(func(i int, s *goquery.Selection) {
@@ -161,24 +170,128 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	return res, nil
 }
 
-/*
-Расширенный поиск через animego.me. Собирает дополнительные данные об аниме.
+// Возвращает данные по эпизодам.
+//
+// :link: ссылка на страницу с данными (прим: https://animego.me/anime/volchica-i-pryanosti-torgovec-vstrechaet-mudruyu-volchicu-2546)
+//
+// Возвращает отсортированный по номеру серии срез ссылок на EpisodeInfo
+func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
+	episodes_info := make([]*EpisodeInfo, 0)
 
-:title: Название
+	params := url.Values{}
+	referer := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
+	params.Set("type", "episodeSchedule")
+	params.Set("episodeNumber", "99999")
 
-Возвращает массив из ссылок на SearchResult
-*/
+	URL := link + "?" + params.Encode()
+	request, err := http.NewRequestWithContext(ab.context, "get", URL, nil)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : EpisodesInfo : не смог создать request. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+	request.Header.Set("Referer", referer)
+	request.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	request.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := ab.Client.httpClient.Do(request)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : EpisodesInfo : http клиент не смог выполнить запрос, код %d. Ошибка: %v", resp.StatusCode, err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		error_message := fmt.Sprintf("Aniboom parser error : EpisodesInfo : Сервер не вернул ожидаемый код 200. Код: %d\n", resp.StatusCode)
+		log.Println(error_message)
+		return nil, perrors.NewNoResultsError(error_message)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : EpisodesInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+
+	doc.Find("div.row.m-0").Each(func(i int, s *goquery.Selection) {
+		episode_info := EpisodeInfo{}
+		items := s.Find("div")
+		selections := make([]*goquery.Selection, 0)
+		items.Each(func(i int, s *goquery.Selection) {
+			selections = append(selections, s)
+		})
+		num, exists := selections[0].Find("meta").Attr("content")
+		if exists {
+			episode_info.Num = num
+		}
+		episode_info.Status = "анонс"
+		if selections[1].Length() > 0 {
+			episode_info.Title = strings.TrimSpace(selections[1].Text())
+		}
+		if selections[2].Find("span").Length() > 0 {
+			date, exists := selections[2].Find("span").Attr("data_label")
+			if exists {
+				episode_info.Date = date
+			}
+		}
+		if selections[3].Find("span").Length() > 0 {
+			episode_info.Status = "вышел"
+		}
+		episodes_info = append(episodes_info, &episode_info)
+	})
+	sort.Slice(episodes_info, func(i, j int) bool {
+		numI := episodes_info[i].Num
+		numJ := episodes_info[j].Num
+
+		isDigitStr := func(s string) bool {
+			if s == "" {
+				return false
+			}
+			for _, r := range s {
+				if r < '0' || r > '9' {
+					return false
+				}
+			}
+			return true
+		}
+
+		if isDigitStr(numI) && isDigitStr(numJ) {
+			intI, _ := strconv.Atoi(numI)
+			intJ, _ := strconv.Atoi(numJ)
+			return intI < intJ
+		}
+
+		if isDigitStr(numI) && !isDigitStr(numJ) {
+			return true
+		}
+		if !isDigitStr(numI) && isDigitStr(numJ) {
+			return false
+		}
+
+		return numI < numJ
+	})
+	return episodes_info, nil
+}
+
+// Расширенный поиск через animego.me. Собирает дополнительные данные об аниме.
+//
+// :title: Название
+//
+// Возвращает срез ссылок на SearchResult
 func (ab *AniboomParser) Search(title string) ([]*SearchResult, error) {
 	elements, err := ab.FastSearch(title)
 	if err != nil {
-		log.Printf("Aniboom parser error : search : FastSearch не смог найти данные для title %s. Ошибка: %v", title, err)
+		error_message := fmt.Sprintf("Aniboom parser error : search : FastSearch не смог найти данные для title %s. Ошибка: %v", title, err)
+		log.Println(error_message)
 		return nil, err
 	}
 	res := make([]*SearchResult, 0)
 	for _, anime := range elements {
 		c_data, err := ab.AnimeInfo(anime.Link)
 		if err != nil {
-			log.Printf("Aniboom parser error : search : AnimeInfo не смог найти данные для %s по ссылке %s. Ошибка: %v", anime.Title, anime.Link, err)
+			error_message := fmt.Sprintf("Aniboom parser error : search : AnimeInfo не смог найти данные для %s по ссылке %s. Ошибка: %v", anime.Title, anime.Link, err)
+			log.Println(error_message)
 			continue
 		}
 		res = append(res, c_data)
@@ -199,27 +312,33 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 
 	request, err := http.NewRequestWithContext(ab.context, "get", link, nil)
 	if err != nil {
-		return nil, err
+		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : не смог создать request. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	}
 
-	url := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
+	URL := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
 
-	request.Header.Set("Referer", url)
+	request.Header.Set("Referer", URL)
 
 	resp, err := ab.Client.httpClient.Do(request)
 	if err != nil {
-		log.Printf("Aniboom parser error : AnimeInfo : http клиент не смог выполнить запрос, код: %d. Ошибка: %v", resp.StatusCode, err)
-		return nil, parsers_errors.ServiceError
+		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : http клиент не смог выполнить запрос, код: %d. Ошибка: %v", resp.StatusCode, err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	} else if resp.StatusCode == http.StatusTooManyRequests {
-		log.Println("Aniboom parser error : AnimeInfo : Сервер вернул код ошибки 429. Слишком частые запросы")
-		return nil, parsers_errors.TooManyRequests
+		error_message := "Aniboom parser error : AnimeInfo : Сервер вернул код ошибки 429. Слишком частые запросы"
+		log.Println(error_message)
+		return nil, perrors.NewTooManyRequestsError(error_message)
 	} else if resp.StatusCode != http.StatusOK {
 		log.Printf("Aniboom parser error : AnimeInfo : Сервер не вернул ожидаемый код 200. Код: %d\n", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		log.Printf("Aniboom parser error : AnimeInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
-		return nil, parsers_errors.ServiceError
+		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	}
 	c_data.Link = link
 	fullLink := c_data.Link
@@ -250,8 +369,9 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 	}
 	anime_info := doc.Find("div.anime-info dl").First()
 	if anime_info.Length() == 0 {
-		log.Printf("Aniboom parser error : AnimeInfo : doc.Find(\"div.anime-info dl\") не смог найти тег dl")
-		return nil, parsers_errors.NoResults
+		error_message := "Aniboom parser error : AnimeInfo : doc.Find(\"div.anime-info dl\") не смог найти тег dl"
+		log.Println(error_message)
+		return nil, perrors.NewNoResultsError(error_message)
 	}
 	var allDTs []*goquery.Selection
 	var allDDs []*goquery.Selection
@@ -345,8 +465,8 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 	doc.Find("a.screenshots-item").Each(func(i int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if exists {
-			url := dmn + strings.TrimSpace(href)
-			screenshots_urls = append(screenshots_urls, url)
+			URL := dmn + strings.TrimSpace(href)
+			screenshots_urls = append(screenshots_urls, URL)
 		}
 	})
 	c_data.Screenshots = screenshots_urls
@@ -358,18 +478,143 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 			c_data.Trailer = strings.TrimSpace(href)
 		}
 	}
+	result, err := ab.EpisodesInfo(link)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : EpisodesInfo вернул неожиданную ошибку: %v", err)
+		log.Println(error_message)
+		return nil, err
+	}
 
-	c_data.EpisodesInfo = ab.EpisodesInfo(link)
+	c_data.EpisodesInfo = result
 
 	translations_info, err := ab.GetTranslationsInfo(c_data.AnimegoID)
-	if err == parsers_errors.ContentBlocked {
-		log.Printf("Aniboom parser warning : AnimeInfo : GerTranslationsInfo вернул ошибку ContentBlocked")
+	var contentBlocked *perrors.ContentBlocked
+	if errors.As(err, &contentBlocked) {
+		log.Println("Aniboom parser warning : AnimeInfo : GerTranslationsInfo вернул ошибку ContentBlocked")
 	} else if err != nil {
-		log.Printf("Aniboom parser error : AnimeInfo : GerTranslationsInfo вернул неожиданную ошибку: %v", err)
+		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : GerTranslationsInfo вернул неожиданную ошибку: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
 	} else {
 		c_data.Translations = translations_info
 	}
 
 	c_data.OtherInfo = &OtherAniInfo
 	return &c_data, nil
+}
+
+// Получает информацию о переводах и их id для плеера aniboom
+//
+// :animego_id: id аниме на animego.me
+//
+// Возвращает срез ссылок на Translation:
+func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation, error) {
+	translations := make([]*Translation, 0)
+
+	params := url.Values{}
+
+	params.Set("_allow", "true")
+
+	URL := fmt.Sprintf("https://%s/anime/%s/player?", ab.dmn, animego_id) + params.Encode()
+
+	request, err := http.NewRequestWithContext(ab.context, "get", URL, nil)
+
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : не смог создать request. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+
+	referer := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
+	request.Header.Set("X-Requested-With", "XMLHttpRequest")
+	request.Header.Set("Referer", referer)
+
+	resp, err := ab.Client.httpClient.Do(request)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo :  http клиент не смог выполнить запрос, код: %d. Ошибка: %v", resp.StatusCode, err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, perrors.NewTooManyRequestsError("Aniboom parser error : GetTranslationsInfo : Сервер вернул код ошибки 429. Слишком частые запросы")
+	}
+	if resp.StatusCode != http.StatusOK {
+		error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : Сервер не вернул ожидаемый код ошибки 200. Код: %d", resp.StatusCode)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, perrors.NewServiceError(error_message)
+	}
+
+	if doc.Find("div.player-blocked").Length() > 0 {
+		reason_elem := doc.Find("div.h5")
+		if reason_elem.Length() > 0 {
+			reason := strings.TrimSpace(reason_elem.Text())
+			error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : Контент по id %s заблокирован. Причина блокировки: \"%s\"", animego_id, reason)
+			log.Println(error_message)
+			return nil, perrors.NewContentBlockedError(error_message)
+		}
+	}
+	translations_container := doc.Find("div#video-dubbing").First().Find("span.video-player-toggle-item")
+	players_container := doc.Find("div#video-players").First().Find("span.video-player-toggle-item")
+	translation := make(map[string]*Translation)
+
+	translations_container.Each(func(i int, s *goquery.Selection) {
+		dubbing, exists := s.Attr("data-dubbing")
+		if !exists || dubbing == "" {
+			return
+		}
+
+		name := strings.TrimSpace(s.Text())
+		if name == "" {
+			return
+		}
+
+		if _, exists := translation[dubbing]; !exists {
+			translation[dubbing] = &Translation{}
+		}
+
+		translation[dubbing].Name = name
+	})
+	players_container.Each(func(i int, s *goquery.Selection) {
+		provider, exists := s.Attr("data-provider")
+		if !exists || provider != "24" {
+			return
+		}
+
+		dubbing, exists := s.Attr("data-provide-dubbing")
+		if !exists || dubbing == "" {
+			return
+		}
+
+		if _, exists := translation[dubbing]; !exists {
+			translation[dubbing] = &Translation{}
+		}
+
+		translationID, exists := s.Attr("data-player")
+		if !exists || translationID == "" {
+			return
+		}
+
+		lastIndex := strings.LastIndex(translationID, "=")
+		if lastIndex != -1 && lastIndex < len(translationID)-1 {
+			translationID = translationID[lastIndex+1:]
+		}
+
+		translation[dubbing].TranslationID = translationID
+	})
+
+	for _, translation_info := range translation {
+		if len(translation_info.Name) > 0 && len(translation_info.TranslationID) > 0 {
+			translations = append(translations, translation_info)
+		}
+	}
+
+	return translations, nil
 }
