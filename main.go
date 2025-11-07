@@ -7,21 +7,14 @@ import (
 )
 
 func main() {
-	title := "Врата Штейна"
+	title := "Связанные"
 	AniboomParser := parsers.NewAniboomParser("")
-	result, err := AniboomParser.FastSearch(title)
+	result, err := AniboomParser.Search(title)
 	if err != nil {
 		fmt.Printf("FastSearch вернул ошибку: %v", err)
 		return
 	}
-	for _, v := range *result {
-		fmt.Println("------------------------------------")
-		fmt.Printf("AnimegoID: %s\n", v.AnimegoID)
-		fmt.Printf("Link: %s\n", v.Link)
-		fmt.Printf("OtherTitle: %s\n", v.OtherTitle)
-		fmt.Printf("Title: %s\n", v.Title)
-		fmt.Printf("Type: %s\n", v.Type)
-		fmt.Printf("Year: %s\n", v.Year)
-		fmt.Println("------------------------------------")
+	for _, v := range result {
+		fmt.Printf("%+v", *v)
 	}
 }
