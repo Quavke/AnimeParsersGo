@@ -176,13 +176,29 @@ func (e *DecryptionFailure) Error() string {
 	return "Не удалось дешифровать ссылку от kodik"
 }
 
+// Ошибка для обозначения неудачного декодирования ответа сервера в json
+type JsonDecodeFailure struct {
+	message string
+}
+
+func NewJsonDecodeFailureError(message string) error {
+	return &JsonDecodeFailure{message: message}
+}
+
+func (e *JsonDecodeFailure) Error() string {
+	if e.message != "" {
+		return e.message
+	}
+	return "Не удалось преобразовать ответ сервера в json"
+}
+
 // Ошибка для обозначения ошибки парсинга html
 type HTMLParse struct {
 	message string
 }
 
 func NewHTMLParseError(message string) error {
-	return &DecryptionFailure{message: message}
+	return &HTMLParse{message: message}
 }
 
 func (e *HTMLParse) Error() string {
@@ -190,4 +206,19 @@ func (e *HTMLParse) Error() string {
 		return e.message
 	}
 	return "Не удалось найти тег, атрибут, класс, id или другое"
+}
+
+type AttributeError struct {
+	message string
+}
+
+func NewAttributeError(message string) error {
+	return &HTMLParse{message: message}
+}
+
+func (e *AttributeError) Error() string {
+	if e.message != "" {
+		return e.message
+	}
+	return "Не удалось найти атрибут"
 }
