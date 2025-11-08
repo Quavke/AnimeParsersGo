@@ -1,5 +1,7 @@
 .vscode
 *.py
 *.html
+*.txt
+*.sh
 app
 output
