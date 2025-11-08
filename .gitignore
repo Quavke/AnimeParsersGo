@@ -1,0 +1,5 @@
+.vscode
+*.py
+*.html
+app
+output
