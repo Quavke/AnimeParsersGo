@@ -1,3 +1,4 @@
 import json
 
-json.loads
+a = ""
+a.replace

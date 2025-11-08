@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "анимего",
+        "парсинга",
         "ранобэ",
         "Aniboom",
         "animego",
@@ -8,5 +9,8 @@
         "perrors",
         "Ranobe",
         "ssearch"
-    ]
+    ],
+    "go.languageServerExperimentalFeatures": {
+        "documentLink": false
+    }
 }

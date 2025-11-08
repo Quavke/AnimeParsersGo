@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,7 +112,7 @@ type SearchResult struct {
 
 Возвращает срез ссылок на FastSearchResult
 */
-func (ab *AniboomParser) FastSearch(title string) (*[]FastSearchResult, error) {
+func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	params := url.Values{}
 
 	params.Set("type", "small")
@@ -146,7 +147,7 @@ func (ab *AniboomParser) FastSearch(title string) (*[]FastSearchResult, error) {
 	}
 
 	if err != nil || resp.StatusCode != http.StatusOK {
-		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : http клиент не смог выполнить запрос. Ошибка: %v", err)
+		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : http клиент не смог выполнить запрос. Ошибка: %v\n", err)
 		log.Println(error_message)
 		return nil, perrors.NewServiceError(error_message)
 	}
@@ -172,12 +173,18 @@ func (ab *AniboomParser) FastSearch(title string) (*[]FastSearchResult, error) {
 		log.Println(error_message)
 		return nil, perrors.NewServiceError(error_message)
 	}
-	res := make([]FastSearchResult, 0)
-	items := doc.Find("div.result-search-anime").First().Find("div.result-search-item")
+	res := make([]*FastSearchResult, 0)
+	var items *goquery.Selection
+	items = doc.Find("div.result-search-anime").Find("div.result-search-item")
 	if items.Length() == 0 {
-		error_message := "Aniboom parser error : FastSearch : в контейнере result-search-anime не найдено ни одного элемента div.result-search-item"
-		log.Println(error_message)
-		return nil, perrors.NewNoResultsError(error_message)
+		warn_message := "Aniboom parser error : FastSearch : в контейнере result-search-anime не найдено ни одного элемента div.result-search-item"
+		log.Println(warn_message)
+		items = doc.Find("div.result-search-item")
+		if items.Length() == 0 {
+			error_message := "Aniboom parser error : FastSearch : в html ответа не найдено ни одного элемента div.result-search-item"
+			log.Println(error_message)
+			return nil, perrors.NewNoResultsError(error_message)
+		}
 	}
 
 	items.Each(func(i int, s *goquery.Selection) {
@@ -202,11 +209,10 @@ func (ab *AniboomParser) FastSearch(title string) (*[]FastSearchResult, error) {
 		} else {
 			c_data.AnimegoID = ""
 		}
-		fmt.Println(c_data)
-		res = append(res, c_data)
+		res = append(res, &c_data)
 	})
-
-	return &res, nil
+	//fmt.Println(json_response.Content)
+	return res, nil
 }
 
 // Возвращает данные по эпизодам.
@@ -354,8 +360,9 @@ func (ab *AniboomParser) Search(title string) ([]*SearchResult, error) {
 		return nil, err
 	}
 	res := make([]*SearchResult, 0)
-	for _, anime := range *elements {
-		c_data, err := ab.AnimeInfo(anime.Link)
+	for _, anime := range elements {
+		anime_indirect := *anime
+		c_data, err := ab.AnimeInfo(anime_indirect.Link)
 		if err != nil {
 			error_message := fmt.Sprintf("Aniboom parser error : search : AnimeInfo не смог найти данные для %s по ссылке %s. Ошибка: %v", anime.Title, anime.Link, err)
 			log.Println(error_message)
@@ -476,7 +483,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 		}
 	})
 	other_anime_info := make(map[string]string, 0)
-	var OtherAniInfo OtherAnimeInfo
+	OtherAniInfo := OtherAnimeInfo{}
 	minLen := len(allDTs)
 	if minLen > len(allDDs) {
 		minLen = len(allDDs)
@@ -933,7 +940,7 @@ func (ab *AniboomParser) get_media_src(embed_link, translation string, episode i
 	}
 
 	var second_data map[string]interface{}
-	str_data := fmt.Sprintf("%v", second_data["dash"])
+	str_data := fmt.Sprintf("%v", first_data["dash"])
 	if err := json.Unmarshal([]byte(str_data), &second_data); err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : не удалось преобразовать first_data. Ошибка: %v", err)
 		return "", perrors.NewServiceError(error_message)
@@ -945,4 +952,182 @@ func (ab *AniboomParser) get_media_src(embed_link, translation string, episode i
 		return "", perrors.NewServiceError(error_message)
 	}
 	return media_src, nil
+}
+
+// Возвращает путь до mpd файла (без самого файла)
+//
+// :embed_link: ссылка на embed (можно получить из _get_embed_link)
+// :episode: Номер эпизода (вышедшего) (Если фильм - 0)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+//
+// Пример возвращаемого: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/
+func (ab *AniboomParser) get_media_server(embed_link, translation string, episode int) (string, error) {
+	src, err := ab.get_media_src(embed_link, translation, episode)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_media_server : get_media_src вернул ошибку. Ошибка: %v", err)
+		return "", perrors.NewServiceError(error_message)
+	}
+	lastSlashIndex := strings.LastIndex(src, "/")
+	if lastSlashIndex == -1 && lastSlashIndex < len(src)-1 {
+		src = src[:lastSlashIndex+1]
+	} else {
+		error_message := fmt.Sprintf("Aniboom parser error : get_media_server : Не удалось найти \"/\" для ссылки: %s", src)
+		return "", perrors.NewServiceError(error_message)
+	}
+	return src, nil
+}
+
+// Просто отрезает от ссылки на mpd файл сам файл.
+//
+// :media_src: ссылка на mpd файл (прим: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/v26utto64xx66.mpd)
+//
+// Пример возвращаемого: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/
+func (ab *AniboomParser) get_media_server_from_src(media_str string) (string, error) {
+	lastSlashIndex := strings.LastIndex(media_str, "/")
+	if lastSlashIndex == -1 && lastSlashIndex < len(media_str)-1 {
+		media_str = media_str[:lastSlashIndex+1]
+	} else {
+		error_message := fmt.Sprintf("Aniboom parser error : get_media_server_from_src : Не удалось найти \"/\" для ссылки: %s", media_str)
+		return "", perrors.NewServiceError(error_message)
+	}
+	return media_str, nil
+}
+
+// Получение файла mpd через embed_link
+//
+// :embed_link: ссылка на embed (можно получить из _get_embed_link)
+// :episode: Номер эпизода (вышедшего) (Если фильм - 0)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+//
+// Возвращает mpd файл в виде текста. (Можно сохранить результат как res.mpd и при запуске через поддерживающий mpd файлы плеер должна начаться серия)
+// Обратите внимание, что файл содержит именно ссылки на части изначального файла, поэтому не сможет запуститься без интернета.
+// Также в файле содержится сразу несколько "качеств" видео (от 480 до 1080 в большинстве случаев).
+// Если вам нужен mp4 файл воспользуйтесь ffmpeg или другими конвертерами
+func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episode int) (string, error) {
+	media_src, err := ab.get_media_src(embed_link, translation, episode)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : get_media_src вернул ошибку. Ошибка: %v", err)
+		return "", perrors.NewServiceError(error_message)
+	}
+
+	origin := "https://aniboom.one"
+	referer := "https://aniboom.one/"
+
+	request, err := http.NewRequestWithContext(ab.Context, "GET", media_src, nil)
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не смог создать request. Ошибка: %v", err)
+		log.Println(error_message)
+		return "", perrors.NewServiceError(error_message)
+	}
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Referer", referer)
+
+	var playlist *http.Response
+	for attempt := 1; attempt <= 50; attempt++ {
+		playlist, err = ab.Client.httpClient.Do(request)
+		if err != nil {
+			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+			log.Println(error_message)
+			continue
+		} else if playlist.StatusCode != http.StatusOK {
+			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+			log.Println(error_message)
+			continue
+		} else {
+			break
+		}
+	}
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist :  http клиент не смог выполнить запрос. Ошибка: %v", err)
+		log.Println(error_message)
+		return "", perrors.NewServiceError(error_message)
+	}
+	defer playlist.Body.Close()
+	if playlist.StatusCode != http.StatusOK {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : Сервер не вернул ожидаемый код 200. Код: %d", playlist.StatusCode)
+		return "", perrors.NewServiceError(error_message)
+	}
+
+	body, err := io.ReadAll(playlist.Body)
+	str_playlist := string(body)
+	if strings.Contains(str_playlist, "<MPD") {
+		lastSlashIndex := strings.LastIndex(media_src, "/")
+		lastDotIndex := strings.LastIndex(media_src, ".")
+		if (lastSlashIndex == -1 && lastSlashIndex < len(str_playlist)-1) || (lastDotIndex == -1 && lastDotIndex < len(str_playlist)-1) {
+			return "", perrors.NewServiceError("Aniboom parser error : get_mpd_playlist : playlist не содержит / или .")
+		}
+		filename := media_src[lastSlashIndex+1 : lastDotIndex]
+
+		server_path := media_src[:lastDotIndex]
+		str_playlist = strings.Replace(str_playlist, filename, server_path, -1)
+	} else {
+		lastSubstrIndex := strings.LastIndex(str_playlist, "master_device.m3u8")
+		if lastSubstrIndex == -1 && lastSubstrIndex < len(str_playlist)-1 {
+			return "", perrors.NewServiceError("Aniboom parser error : get_mpd_playlist : body не содержит \"master_device.m3u8\"")
+		}
+		server_path := media_src[:lastSubstrIndex]
+		str_playlist = strings.Replace(str_playlist, "media_", server_path, -1)
+	}
+	return str_playlist, nil
+}
+
+// Возвращает mpd файл строкой (содержимое файла)
+//
+// :animego_id: id аниме на animego.me (может быть найдена из FastSearch по в поле AnimegoID для нужного аниме или из Search по тому же полю для нужного аниме) (из ссылки на страницу аниме https://animego.me/anime/volchica-i-pryanosti-torgovec-vstrechaet-mudruyu-volchicu-2546 > 2546)
+//
+// :episode: Номер эпизода (вышедшего) (Если фильм - 0)
+//
+// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+//
+// Возвращает mpd файл в виде текста. (Можно сохранить результат как res.mpd и при запуске через поддерживающий mpd файлы плеер должна начаться серия)
+// Обратите внимание, что файл содержит именно ссылки на части изначального файла, поэтому не сможет запуститься без интернета.
+// Также в файле содержится сразу несколько "качеств" видео (от 480 до 1080 в большинстве случаев).
+// Если вам нужен mp4 файл воспользуйтесь ffmpeg или другими конвертерами
+func (ab *AniboomParser) GetMPDPlaylist(animego_id, translation_id string, episode int) (string, error) {
+	embed_link, err := ab.get_embed_link(animego_id)
+	if err != nil {
+		log.Printf("Aniboom parser error : GetMPDPlaylist : get_embed_link вернул ошибку. Ошибка: %v", err)
+		return "", err
+	}
+	mpd_playlist, err := ab.get_mpd_playlist(embed_link, translation_id, episode)
+	if err != nil {
+		log.Printf("Aniboom parser error : GetMPDPlaylist : get_mpd_playlist вернул ошибку. Ошибка: %v", err)
+		return "", err
+	}
+	return mpd_playlist, nil
+}
+
+// Сохраняет mpd файл как указанный filename
+//
+// :animego_id: id аниме на animego.me (может быть найдена из FastSearch в поле AnimegoID для нужного аниме или из Search по тому же полю для нужного аниме) (из ссылки на страницу аниме https://animego.me/anime/volchica-i-pryanosti-torgovec-vstrechaet-mudruyu-volchicu-2546 > 2546)
+//
+// :episode: Номер эпизода (вышедшего) (Если фильм - 0)
+//
+// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+//
+// :filename: Имя/путь для сохраняемого файла обязательно чтобы было .mpd расширение (прим: result.mpd или content/result.mpd)
+//
+// Обратите внимание, что файл содержит именно ссылки на части изначального файла, поэтому не сможет запуститься без интернета.
+// Также в файле содержится сразу несколько "качеств" видео (от 480 до 1080 в большинстве случаев).
+// Если вам нужен mp4 файл воспользуйтесь ffmpeg или другими конвертерами
+func (ab *AniboomParser) GetAsFile(animego_id, translation_id, filename string, episode int) error {
+	mpd_playlist, err := ab.GetMPDPlaylist(animego_id, translation_id, episode)
+	if err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist вернул ошибку")
+		return err
+	}
+
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(mpd_playlist); err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
+		return err
+	}
+
+	return nil
 }
