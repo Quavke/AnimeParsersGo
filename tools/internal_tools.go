@@ -1,5 +1,7 @@
 package tools
 
+// не используется
+
 // // обёртка над http.Response
 // type Response struct {
 // 	http.Response
