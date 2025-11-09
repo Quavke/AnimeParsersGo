@@ -88,7 +88,7 @@ type OtherAnimeInfo struct {
 }
 type SearchResult struct {
 	Title        string            `json:"title"`
-	OtherTitle   string            `json:"other_title"`
+	OtherTitle   []string          `json:"other_title"`
 	Status       string            `json:"status"`
 	Type         string            `json:"type"`
 	Genres       []string          `json:"genres"`
@@ -140,6 +140,7 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : FastSearch : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
 		} else {
 			break
@@ -211,7 +212,6 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 		}
 		res = append(res, &c_data)
 	})
-	//fmt.Println(json_response.Content)
 	return res, nil
 }
 
@@ -249,6 +249,7 @@ func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : EpisodesInfo : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
 		} else {
 			break
@@ -303,7 +304,7 @@ func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
 			episode_info.Title = strings.TrimSpace(selections[1].Text())
 		}
 		if selections[2].Find("span").Length() > 0 {
-			date, exists := selections[2].Find("span").Attr("data_label")
+			date, exists := selections[2].Find("span").Attr("data-label")
 			if exists {
 				episode_info.Date = date
 			}
@@ -404,6 +405,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
 		} else {
 			break
@@ -437,6 +439,13 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 	}
 	dmn := fmt.Sprintf("https://%s", ab.dmn)
 	c_data.Title = strings.TrimSpace(doc.Find("div.anime-title h1").Text())
+
+	other_titles := make([]string, 0)
+
+	doc.Find("div.anime-synonyms").Find("li").Each(func(i int, s *goquery.Selection) {
+		other_titles = append(other_titles, strings.TrimSpace(s.Text()))
+	})
+
 	poster_url_doc := doc.Find("img").First()
 	if poster_url_doc.Length() > 0 {
 		src, exists := poster_url_doc.Attr("src")
@@ -578,6 +587,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 	var contentBlocked *perrors.ContentBlocked
 	if errors.As(err, &contentBlocked) {
 		log.Println("Aniboom parser warning : AnimeInfo : GetTranslationsInfo вернул ошибку ContentBlocked")
+		c_data.Translations = []*Translation{}
 	} else if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : GetTranslationsInfo вернул неожиданную ошибку: %v", err)
 		log.Println(error_message)
@@ -596,7 +606,6 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 //
 // Возвращает срез ссылок на Translation:
 func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation, error) {
-	translations := make([]*Translation, 0)
 
 	params := url.Values{}
 
@@ -626,6 +635,7 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
 		} else {
 			break
@@ -659,7 +669,6 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 			json_response.Status, json_response.Message, animego_id,
 		))
 	}
-
 	htmlContent := html.UnescapeString(json_response.Content)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
@@ -670,16 +679,24 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 
 	if doc.Find("div.player-blocked").Length() > 0 {
 		reason_elem := doc.Find("div.h5")
+		var reason string
 		if reason_elem.Length() > 0 {
-			reason := strings.TrimSpace(reason_elem.Text())
-			error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : Контент по id %s заблокирован. Причина блокировки: \"%s\"", animego_id, reason)
-			log.Println(error_message)
-			return nil, perrors.NewContentBlockedError(error_message)
+			reason = strings.TrimSpace(reason_elem.Text())
 		}
+		error_message := fmt.Sprintf("Aniboom parser error : GetTranslationsInfo : Контент по id %s заблокирован. Причина блокировки: \"%s\"", animego_id, reason)
+		log.Println(error_message)
+		return nil, perrors.NewContentBlockedError(error_message)
 	}
-	translations_container := doc.Find("div#video-dubbing").First().Find("span.video-player-toggle-item")
-	players_container := doc.Find("div#video-players").First().Find("span.video-player-toggle-item")
+	translations_container := doc.Find("#video-dubbing").Find("span.video-player-toggle-item")
+	players_container := doc.Find("#video-players").Find("span.video-player-toggle-item")
 	translation := make(map[string]*Translation)
+
+	if translations_container.Length() == 0 {
+		log.Printf("Aniboom parser warning : GetTranslationsInfo : ни одного translations контейнера не было найдено для animego_id %s", animego_id)
+	}
+	if players_container.Length() == 0 {
+		log.Printf("Aniboom parser warning : GetTranslationsInfo : ни одного players контейнера не было найдено для animego_id %s", animego_id)
+	}
 
 	translations_container.Each(func(i int, s *goquery.Selection) {
 		dubbing, exists := s.Attr("data-dubbing")
@@ -697,7 +714,10 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 		}
 
 		translation[dubbing].Name = name
+
 	})
+	translations := make([]*Translation, 0)
+
 	players_container.Each(func(i int, s *goquery.Selection) {
 		provider, exists := s.Attr("data-provider")
 		if !exists || provider != "24" {
@@ -705,7 +725,7 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 		}
 
 		dubbing, exists := s.Attr("data-provide-dubbing")
-		if !exists || dubbing == "" {
+		if !exists {
 			return
 		}
 
@@ -714,7 +734,7 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 		}
 
 		translationID, exists := s.Attr("data-player")
-		if !exists || translationID == "" {
+		if !exists {
 			return
 		}
 
@@ -725,14 +745,14 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 
 		translation[dubbing].TranslationID = translationID
 	})
-
+	result := make([]*Translation, 0)
 	for _, translation_info := range translation {
 		if len(translation_info.Name) > 0 && len(translation_info.TranslationID) > 0 {
-			translations = append(translations, translation_info)
+			result = append(translations, translation_info)
 		}
 	}
 
-	return translations, nil
+	return result, nil
 }
 
 // Возвращает ссылку на embed от aniboom. Сама по себе ссылка не может быть использована, однако требуется для дальнейшего парсинга.
@@ -766,7 +786,10 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : get_embed_link : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
+		} else if resp.StatusCode == http.StatusTooManyRequests {
+			return "", perrors.NewTooManyRequestsError("Aniboom parser error : get_embed_link : Сервер вернул код ошибки 429. Слишком частые запросы")
 		} else {
 			break
 		}
@@ -776,10 +799,13 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 		log.Println(error_message)
 		return "", perrors.NewServiceError(error_message)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return "", perrors.NewTooManyRequestsError("Aniboom parser error : get_embed_link : Сервер вернул код ошибки 429. Слишком частые запросы")
+	if resp == nil {
+		error_message := "Aniboom parser error : get_embed_link :  http клиент не смог выполнить запрос. Ответ равен nil"
+		log.Println(error_message)
+		return "", perrors.NewServiceError(error_message)
 	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		error_message := fmt.Sprintf("Aniboom parser error : get_embed_link : Сервер не вернул ожидаемый код 200. Код: %d", resp.StatusCode)
 		log.Println(error_message)
@@ -800,6 +826,17 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 	}
 
 	htmlContent := html.UnescapeString(json_response.Content)
+	file, err := os.Create("index.html")
+	if err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
+		return "", err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(htmlContent); err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
+		return "", err
+	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_embed_link : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -823,11 +860,13 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 
 	var player_link string
 	if span.Length() > 0 {
-		if attrValue, exists := span.Attr("data-player"); exists {
+		if attrValue, exists := span.Attr("data-player"); exists && len(attrValue) > 0 {
 			player_link = attrValue
 		} else {
 			return "", perrors.NewAttributeError(fmt.Sprintf("Aniboom parser error : get_embed_link : для указанного id %s не удалось найти aniboom embed_link", animego_id))
 		}
+	} else {
+		return "", perrors.NewServiceError("Aniboom parser error : get_embed_link : span с video-player-toggle-item не найден или отсутствует атрибут data-provider=24")
 	}
 
 	lastQuestionIndex := strings.LastIndex(player_link, "?")
@@ -844,7 +883,7 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 //
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 //
-// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) (string, error) {
 	params := url.Values{}
 
@@ -874,6 +913,7 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 		} else if resp.StatusCode != http.StatusOK {
 			error_message := fmt.Sprintf("Aniboom parser error : get_embed : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			resp.Body.Close()
 			continue
 		} else {
 			break
@@ -895,7 +935,8 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal("Ошибка при чтении тела ответа:", err)
+		log.Println("Aniboom parser error : get_embed_link : Ошибка при чтении тела ответа:", err)
+		return "", perrors.NewServiceError(fmt.Sprintf("Aniboom parser error : get_embed_link : Ошибка при чтении тела ответа: %v", err))
 	}
 
 	bodyText := string(bodyBytes)
@@ -906,7 +947,7 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 //
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 //
-// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
 // Пример возвращаемого: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/v26utto64xx66.mpd
 func (ab *AniboomParser) get_media_src(embed_link, translation string, episode int) (string, error) {
@@ -958,7 +999,7 @@ func (ab *AniboomParser) get_media_src(embed_link, translation string, episode i
 //
 // :embed_link: ссылка на embed (можно получить из _get_embed_link)
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
-// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
 // Пример возвращаемого: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/
 func (ab *AniboomParser) get_media_server(embed_link, translation string, episode int) (string, error) {
@@ -968,7 +1009,7 @@ func (ab *AniboomParser) get_media_server(embed_link, translation string, episod
 		return "", perrors.NewServiceError(error_message)
 	}
 	lastSlashIndex := strings.LastIndex(src, "/")
-	if lastSlashIndex == -1 && lastSlashIndex < len(src)-1 {
+	if lastSlashIndex != -1 && lastSlashIndex < len(src)-1 {
 		src = src[:lastSlashIndex+1]
 	} else {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_server : Не удалось найти \"/\" для ссылки: %s", src)
@@ -984,7 +1025,7 @@ func (ab *AniboomParser) get_media_server(embed_link, translation string, episod
 // Пример возвращаемого: https://sophia.yagami-light.com/7p/7P9qkv26dQ8/
 func (ab *AniboomParser) get_media_server_from_src(media_str string) (string, error) {
 	lastSlashIndex := strings.LastIndex(media_str, "/")
-	if lastSlashIndex == -1 && lastSlashIndex < len(media_str)-1 {
+	if lastSlashIndex != -1 && lastSlashIndex < len(media_str)-1 {
 		media_str = media_str[:lastSlashIndex+1]
 	} else {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_server_from_src : Не удалось найти \"/\" для ссылки: %s", media_str)
@@ -997,7 +1038,7 @@ func (ab *AniboomParser) get_media_server_from_src(media_str string) (string, er
 //
 // :embed_link: ссылка на embed (можно получить из _get_embed_link)
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
-// :translation: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
 // Возвращает mpd файл в виде текста. (Можно сохранить результат как res.mpd и при запуске через поддерживающий mpd файлы плеер должна начаться серия)
 // Обратите внимание, что файл содержит именно ссылки на части изначального файла, поэтому не сможет запуститься без интернета.
@@ -1028,8 +1069,14 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 		if err != nil {
 			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
+			playlist.Body.Close()
 			continue
 		} else if playlist.StatusCode != http.StatusOK {
+			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+			log.Println(error_message)
+			playlist.Body.Close()
+			continue
+		} else if playlist == nil {
 			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
 			log.Println(error_message)
 			continue
@@ -1053,20 +1100,20 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 	if strings.Contains(str_playlist, "<MPD") {
 		lastSlashIndex := strings.LastIndex(media_src, "/")
 		lastDotIndex := strings.LastIndex(media_src, ".")
-		if (lastSlashIndex == -1 && lastSlashIndex < len(str_playlist)-1) || (lastDotIndex == -1 && lastDotIndex < len(str_playlist)-1) {
-			return "", perrors.NewServiceError("Aniboom parser error : get_mpd_playlist : playlist не содержит / или .")
+		if lastSlashIndex == -1 || lastDotIndex == -1 || lastSlashIndex >= lastDotIndex {
+			return "", perrors.NewServiceError("Aniboom parser error: invalid media_src format")
 		}
 		filename := media_src[lastSlashIndex+1 : lastDotIndex]
 
 		server_path := media_src[:lastDotIndex]
 		str_playlist = strings.Replace(str_playlist, filename, server_path, -1)
 	} else {
-		lastSubstrIndex := strings.LastIndex(str_playlist, "master_device.m3u8")
-		if lastSubstrIndex == -1 && lastSubstrIndex < len(str_playlist)-1 {
-			return "", perrors.NewServiceError("Aniboom parser error : get_mpd_playlist : body не содержит \"master_device.m3u8\"")
+		lastSubstrIndex := strings.LastIndex(media_src, "master_device.m3u8")
+		if lastSubstrIndex == -1 {
+			return "", errors.New("master_device.m3u8 не найден в media_src")
 		}
 		server_path := media_src[:lastSubstrIndex]
-		str_playlist = strings.Replace(str_playlist, "media_", server_path, -1)
+		str_playlist = strings.Replace(str_playlist, "media_", server_path+"media_", -1)
 	}
 	return str_playlist, nil
 }
@@ -1077,7 +1124,7 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 //
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 //
-// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
 // Возвращает mpd файл в виде текста. (Можно сохранить результат как res.mpd и при запуске через поддерживающий mpd файлы плеер должна начаться серия)
 // Обратите внимание, что файл содержит именно ссылки на части изначального файла, поэтому не сможет запуститься без интернета.
@@ -1089,6 +1136,7 @@ func (ab *AniboomParser) GetMPDPlaylist(animego_id, translation_id string, episo
 		log.Printf("Aniboom parser error : GetMPDPlaylist : get_embed_link вернул ошибку. Ошибка: %v", err)
 		return "", err
 	}
+
 	mpd_playlist, err := ab.get_mpd_playlist(embed_link, translation_id, episode)
 	if err != nil {
 		log.Printf("Aniboom parser error : GetMPDPlaylist : get_mpd_playlist вернул ошибку. Ошибка: %v", err)
@@ -1103,7 +1151,7 @@ func (ab *AniboomParser) GetMPDPlaylist(animego_id, translation_id string, episo
 //
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 //
-// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из get_translations_info)
+// :translation_id: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
 // :filename: Имя/путь для сохраняемого файла обязательно чтобы было .mpd расширение (прим: result.mpd или content/result.mpd)
 //

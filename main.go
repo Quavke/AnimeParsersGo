@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	title := "Врата Штейна 0"
+	title := "Поднятие уровня в одиночку"
 	AniboomParser := parsers.NewAniboomParser("animego.org")
 	result, err := AniboomParser.FastSearch(title)
 	if err != nil {
@@ -42,6 +42,17 @@ func main() {
 	anime_info := *anime_info_res
 	fmt.Printf("AnimeInfo: %+v\n\n", anime_info)
 
+	fmt.Printf("Translations: %+v\n\n", anime_info.Translations)
+
+	trans_info, err := AniboomParser.GetTranslationsInfo(anime_info.AnimegoID)
+	if err != nil {
+		fmt.Printf("GetTranslationsInfo вернул ошибку: %v", err)
+		return
+	}
+	for _, v := range trans_info {
+		fmt.Printf("GetTranslationsInfo: %+v\n\n", *v)
+	}
+
 	err = AniboomParser.GetAsFile(anime_info.AnimegoID, anime_info.Translations[0].TranslationID, "output", 1)
 	if err != nil {
 		fmt.Printf("GetAsFile вернул ошибку: %v", err)
@@ -54,13 +65,4 @@ func main() {
 		return
 	}
 	fmt.Printf("GetMPDPlaylist: %s\n\n", str)
-
-	trans_info, err := AniboomParser.GetTranslationsInfo(anime_info.AnimegoID)
-	if err != nil {
-		fmt.Printf("GetTranslationsInfo вернул ошибку: %v", err)
-		return
-	}
-	for _, v := range trans_info {
-		fmt.Printf("GetTranslationsInfo: %+v\n\n", *v)
-	}
 }
