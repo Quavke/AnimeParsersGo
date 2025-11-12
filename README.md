@@ -1,6 +1,6 @@
 # 🎌 AnimeParsersGo
 
-![Go](https://img.shields.io/badge/Go-1.20%2B-blue?logo=go)
+![Go](https://img.shields.io/badge/Go-1.23%2B-blue?logo=go)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Version](https://img.shields.io/badge/version-1.0.0-orange)
 

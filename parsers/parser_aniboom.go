@@ -826,17 +826,17 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 	}
 
 	htmlContent := html.UnescapeString(json_response.Content)
-	file, err := os.Create("index.html")
-	if err != nil {
-		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
-		return "", err
-	}
-	defer file.Close()
+	// file, err := os.Create("index.html")
+	// if err != nil {
+	// 	log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
+	// 	return "", err
+	// }
+	// defer file.Close()
 
-	if _, err := file.WriteString(htmlContent); err != nil {
-		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
-		return "", err
-	}
+	// if _, err := file.WriteString(htmlContent); err != nil {
+	// 	log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
+	// 	return "", err
+	//}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_embed_link : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -956,7 +956,8 @@ func (ab *AniboomParser) get_media_src(embed_link, translation string, episode i
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : get_embed вернула ошибку: %v", err)
 		return "", perrors.NewServiceError(error_message)
 	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(embed))
+	htmlContent := html.UnescapeString(embed)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
 		return "", perrors.NewServiceError(error_message)
@@ -974,19 +975,19 @@ func (ab *AniboomParser) get_media_src(embed_link, translation string, episode i
 		return "", perrors.NewServiceError("Aniboom parser error : get_media_src : для указанного embed_link \"%s\" в div#video не найден атрибут data-parameters")
 	}
 
-	var first_data map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonData), &first_data); err != nil {
-		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : не удалось преобразовать jsonData. Ошибка: %v", err)
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : не удалось преобразовать jsonData. Ошибка: %v\njsonData: %s", err, jsonData)
 		return "", perrors.NewServiceError(error_message)
 	}
 
-	var second_data map[string]interface{}
-	str_data := fmt.Sprintf("%v", first_data["dash"])
-	if err := json.Unmarshal([]byte(str_data), &second_data); err != nil {
+	var dash_data map[string]interface{}
+	str_data := fmt.Sprintf("%v", data["dash"])
+	if err := json.Unmarshal([]byte(str_data), &dash_data); err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : не удалось преобразовать first_data. Ошибка: %v", err)
 		return "", perrors.NewServiceError(error_message)
 	}
-	src := second_data["src"]
+	src := dash_data["src"]
 	media_src, ok := src.(string)
 	if !ok {
 		error_message := fmt.Sprintf("Aniboom parser error : get_media_src : src не является строкой. Src: %v", src)
@@ -1045,9 +1046,46 @@ func (ab *AniboomParser) get_media_server_from_src(media_str string) (string, er
 // Также в файле содержится сразу несколько "качеств" видео (от 480 до 1080 в большинстве случаев).
 // Если вам нужен mp4 файл воспользуйтесь ffmpeg или другими конвертерами
 func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episode int) (string, error) {
-	media_src, err := ab.get_media_src(embed_link, translation, episode)
+	embed, err := ab.get_embed(embed_link, translation, episode)
 	if err != nil {
-		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : get_media_src вернул ошибку. Ошибка: %v", err)
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : get_embed вернул ошибку. Ошибка: %v", err)
+		return "", perrors.NewServiceError(error_message)
+	}
+	// htmlContent := html.UnescapeString(embed)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(embed))
+	if err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		return "", perrors.NewServiceError(error_message)
+	}
+	var jsonData string
+	doc.Find("div#video").First().Each(func(i int, s *goquery.Selection) {
+		data_params, exists := s.Attr("data-parameters")
+		if exists {
+			jsonData = data_params
+		} else {
+			jsonData = ""
+		}
+	})
+	if len(jsonData) == 0 {
+		return "", perrors.NewServiceError("Aniboom parser error : get_mpd_playlist : для указанного embed_link \"%s\" в div#video не найден атрибут data-parameters")
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не удалось преобразовать jsonData. Ошибка: %v\njsonData:%s", err, jsonData)
+		return "", perrors.NewServiceError(error_message)
+	}
+
+	var dash_data map[string]interface{}
+	str_data := fmt.Sprintf("%v", data["dash"])
+	if err := json.Unmarshal([]byte(str_data), &dash_data); err != nil {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не удалось преобразовать first_data. Ошибка: %v", err)
+		return "", perrors.NewServiceError(error_message)
+	}
+	src := dash_data["src"]
+	media_src, ok := src.(string)
+	if !ok {
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : src не является строкой. Src: %v", src)
 		return "", perrors.NewServiceError(error_message)
 	}
 
