@@ -17,6 +17,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	errs "github.com/Quavke/AnimeParsersGo/errors"
+	"github.com/Quavke/AnimeParsersGo/models"
 	t "github.com/Quavke/AnimeParsersGo/tools"
 )
 
@@ -123,11 +124,11 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 	domain := fmt.Sprintf("https://%s/", ab.dmn)
 	URL := fmt.Sprintf("%ssearch/all", domain)
 
-	params := map[string]string{
+	params := models.Params{
 		"type": "small",
 		"q":    title,
 	}
-	headers := map[string]string{
+	headers := models.Headers{
 		"Accept":           "application/json, text/javascript, */*; q=0.01",
 		"X-Requested-With": "XMLHttpRequest",
 		"Referer":          domain,
@@ -212,12 +213,12 @@ func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
 
 	referer := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
 
-	params := map[string]string{
+	params := models.Params{
 		"type":          "episodeSchedule",
 		"episodeNumber": "99999",
 	}
 
-	headers := map[string]string{
+	headers := models.Headers{
 		"Referer":          referer,
 		"Accept":           "application/json, text/javascript, */*; q=0.01",
 		"X-Requested-With": "XMLHttpRequest",
@@ -358,7 +359,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 
 	URL := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
 
-	headers := map[string]string{
+	headers := models.Headers{
 		"Referer": URL,
 	}
 
@@ -552,12 +553,12 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 //
 // Возвращает срез ссылок на Translation:
 func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation, error) {
-	params := map[string]string{
+	params := models.Params{
 		"_allow": "true",
 	}
 
 	referer := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
-	headers := map[string]string{
+	headers := models.Headers{
 		"X-Requested-With": "XMLHttpRequest",
 		"Referer":          referer,
 	}
@@ -677,11 +678,11 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 // Возвращает ссылку в виде: https://aniboom.one/embed/yxVdenrqNar
 // Если ссылка не найдена, возвращает ошибку errs.NoResultsError
 func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
-	params := map[string]string{
+	params := models.Params{
 		"_allow": "true",
 	}
 
-	headers := map[string]string{
+	headers := models.Headers{
 		"X-Requested-With": "XMLHttpRequest",
 	}
 
@@ -768,7 +769,7 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 //
 // :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) (string, error) {
-	params := map[string]string{
+	params := models.Params{
 		"translation": translation,
 	}
 
@@ -777,7 +778,7 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 	}
 
 	referer := fmt.Sprintf("https://%s/", ab.dmn)
-	headers := map[string]string{
+	headers := models.Headers{
 		"Referer": referer,
 	}
 
@@ -941,49 +942,54 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 	origin := "https://aniboom.one"
 	referer := "https://aniboom.one/"
 
-	request, err := http.NewRequestWithContext(ab.Context, "GET", media_src, nil)
-	if err != nil {
-		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не смог создать request. Ошибка: %v", err)
-		log.Println(error_message)
-		return "", errs.NewServiceError(error_message)
-	}
-	request.Header.Set("Origin", origin)
-	request.Header.Set("Referer", referer)
-
-	var playlist *http.Response
-	for attempt := 1; attempt <= 50; attempt++ {
-		playlist, err = ab.Client.httpClient.Do(request)
-		if err != nil {
-			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-			log.Println(error_message)
-			playlist.Body.Close()
-			continue
-		} else if playlist.StatusCode != http.StatusOK {
-			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-			log.Println(error_message)
-			playlist.Body.Close()
-			continue
-		} else if playlist == nil {
-			error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-			log.Println(error_message)
-			continue
-		} else {
-			break
-		}
-	}
-	if err != nil {
-		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist :  http клиент не смог выполнить запрос. Ошибка: %v", err)
-		log.Println(error_message)
-		return "", errs.NewServiceError(error_message)
-	}
-	defer playlist.Body.Close()
-	if playlist.StatusCode != http.StatusOK {
-		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : Сервер не вернул ожидаемый код 200. Код: %d", playlist.StatusCode)
-		return "", errs.NewServiceError(error_message)
+	headers := models.Headers{
+		"Origin":  origin,
+		"Referer": referer,
 	}
 
-	body, err := io.ReadAll(playlist.Body)
-	str_playlist := string(body)
+	response, err := t.RequestWithContext(ab.Context, "GET", media_src, nil, headers, false, nil)
+	// request, err := http.NewRequestWithContext(ab.Context, "GET", media_src, nil)
+	// if err != nil {
+	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не смог создать request. Ошибка: %v", err)
+	// 	log.Println(error_message)
+	// 	return "", errs.NewServiceError(error_message)
+	// }
+	// request.Header.Set("Origin", origin)
+	// request.Header.Set("Referer", referer)
+
+	// var playlist *http.Response
+	// for attempt := 1; attempt <= 50; attempt++ {
+	// 	playlist, err = ab.Client.httpClient.Do(request)
+	// 	if err != nil {
+	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+	// 		log.Println(error_message)
+	// 		playlist.Body.Close()
+	// 		continue
+	// 	} else if playlist.StatusCode != http.StatusOK {
+	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+	// 		log.Println(error_message)
+	// 		playlist.Body.Close()
+	// 		continue
+	// 	} else if playlist == nil {
+	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
+	// 		log.Println(error_message)
+	// 		continue
+	// 	} else {
+	// 		break
+	// 	}
+	// }
+	// if err != nil {
+	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist :  http клиент не смог выполнить запрос. Ошибка: %v", err)
+	// 	log.Println(error_message)
+	// 	return "", errs.NewServiceError(error_message)
+	// }
+	// defer playlist.Body.Close()
+	// if playlist.StatusCode != http.StatusOK {
+	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : Сервер не вернул ожидаемый код 200. Код: %d", playlist.StatusCode)
+	// 	return "", errs.NewServiceError(error_message)
+	// }
+
+	str_playlist := string(response.Data)
 	if strings.Contains(str_playlist, "<MPD") {
 		lastSlashIndex := strings.LastIndex(media_src, "/")
 		lastDotIndex := strings.LastIndex(media_src, ".")

@@ -18,7 +18,7 @@ type RequestResult struct {
 }
 
 // Функция для выполнения HTTP-запросов с контекстом. Any - string или models.JSONResponse
-func RequestWithContext(context context.Context, method, URL string, params map[string]string, headers map[string]string, jsonResp bool, jsonType models.JSONResponse) (*RequestResult, error) {
+func RequestWithContext(context context.Context, method, URL string, params models.Params, headers models.Headers, jsonResp bool, jsonType models.JSONResponse) (*RequestResult, error) {
 	url_params := url.Values{}
 
 	if params != nil {
