@@ -632,7 +632,6 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 		translation[dubbing].Name = name
 
 	})
-	translations := make([]*Translation, 0)
 
 	players_container.Each(func(i int, s *goquery.Selection) {
 		provider, exists := s.Attr("data-provider")
@@ -664,7 +663,7 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 	result := make([]*Translation, 0)
 	for _, translation_info := range translation {
 		if len(translation_info.Name) > 0 && len(translation_info.TranslationID) > 0 {
-			result = append(translations, translation_info)
+			result = append(result, translation_info)
 		}
 	}
 
@@ -901,7 +900,6 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : get_embed вернул ошибку. Ошибка: %v", err)
 		return "", errs.NewServiceError(error_message)
 	}
-	// htmlContent := html.UnescapeString(embed)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(embed))
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -926,16 +924,19 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 		return "", errs.NewServiceError(error_message)
 	}
 
+	dashStr, ok := data["dash"].(string)
+	if !ok {
+		return "", errs.NewServiceError("data['dash'] не является строкой")
+	}
+
 	var dash_data map[string]interface{}
-	str_data := fmt.Sprintf("%v", data["dash"])
-	if err := json.Unmarshal([]byte(str_data), &dash_data); err != nil {
+	if err := json.Unmarshal([]byte(dashStr), &dash_data); err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не удалось преобразовать first_data. Ошибка: %v", err)
 		return "", errs.NewServiceError(error_message)
 	}
-	src := dash_data["src"]
-	media_src, ok := src.(string)
+	media_src, ok := dash_data["src"].(string)
 	if !ok {
-		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : src не является строкой. Src: %v", src)
+		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : src не является строкой. Src: %v", dash_data["src"])
 		return "", errs.NewServiceError(error_message)
 	}
 
@@ -948,46 +949,8 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 	}
 
 	response, err := t.RequestWithContext(ab.Context, "GET", media_src, nil, headers, false, nil)
-	// request, err := http.NewRequestWithContext(ab.Context, "GET", media_src, nil)
-	// if err != nil {
-	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : не смог создать request. Ошибка: %v", err)
-	// 	log.Println(error_message)
-	// 	return "", errs.NewServiceError(error_message)
-	// }
-	// request.Header.Set("Origin", origin)
-	// request.Header.Set("Referer", referer)
 
-	// var playlist *http.Response
-	// for attempt := 1; attempt <= 50; attempt++ {
-	// 	playlist, err = ab.Client.httpClient.Do(request)
-	// 	if err != nil {
-	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-	// 		log.Println(error_message)
-	// 		playlist.Body.Close()
-	// 		continue
-	// 	} else if playlist.StatusCode != http.StatusOK {
-	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-	// 		log.Println(error_message)
-	// 		playlist.Body.Close()
-	// 		continue
-	// 	} else if playlist == nil {
-	// 		error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : http клиент не смог выполнить запрос. Попытка %d", attempt)
-	// 		log.Println(error_message)
-	// 		continue
-	// 	} else {
-	// 		break
-	// 	}
-	// }
-	// if err != nil {
-	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist :  http клиент не смог выполнить запрос. Ошибка: %v", err)
-	// 	log.Println(error_message)
-	// 	return "", errs.NewServiceError(error_message)
-	// }
-	// defer playlist.Body.Close()
-	// if playlist.StatusCode != http.StatusOK {
-	// 	error_message := fmt.Sprintf("Aniboom parser error : get_mpd_playlist : Сервер не вернул ожидаемый код 200. Код: %d", playlist.StatusCode)
-	// 	return "", errs.NewServiceError(error_message)
-	// }
+	fmt.Println(html.UnescapeString(string(response.Data)))
 
 	str_playlist := string(response.Data)
 	if strings.Contains(str_playlist, "<MPD") {
