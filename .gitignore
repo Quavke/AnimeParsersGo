@@ -6,3 +6,5 @@
 app
 apgo
 output
+tests.go
+tests/

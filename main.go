@@ -8,6 +8,36 @@ import (
 
 func main() {
 	title := "Поднятие уровня в одиночку"
+
+	shikimori_test(title)
+
+	// headers := models.Headers{
+	// 	"User-Agent":       "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+	// 	"Accept":           "application/json, text/plain, */*",
+	// 	"X-Requested-With": "XMLHttpRequest",
+	// }
+
+	// params := models.Params{
+	// 	"search": title,
+	// }
+
+	// t.TestURL("https://shikimori.one/animes/autocomplete/v2", "GET", params, headers)
+}
+
+func shikimori_test(title string) {
+	ShikimoriParser := parsers.NewShikimoriParser("")
+	result, err := ShikimoriParser.Search(title)
+	if err != nil {
+		fmt.Printf("Search вернул ошибку: %v", err)
+		return
+	}
+	for _, v := range result {
+		fmt.Printf("Search: %+v\n\n", *v)
+	}
+}
+
+func aniboom_test() {
+	title := "Поднятие уровня в одиночку"
 	AniboomParser := parsers.NewAniboomParser("")
 	result, err := AniboomParser.FastSearch(title)
 	if err != nil {

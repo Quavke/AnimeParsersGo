@@ -8,12 +8,10 @@ import (
 	"html"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	errs "github.com/Quavke/AnimeParsersGo/errors"
@@ -21,14 +19,9 @@ import (
 	t "github.com/Quavke/AnimeParsersGo/tools"
 )
 
-type Client struct {
-	httpClient *http.Client
-}
-
 type AniboomParser struct {
 	dmn     string
-	Client  *Client
-	Context context.Context
+	context context.Context
 }
 
 func NewAniboomParser(mirror string) *AniboomParser {
@@ -38,13 +31,9 @@ func NewAniboomParser(mirror string) *AniboomParser {
 	} else {
 		dmn = "animego.me"
 	}
-	client := &Client{
-		&http.Client{Timeout: 10 * time.Second},
-	}
 	return &AniboomParser{
 		dmn:     dmn,
-		Client:  client,
-		Context: context.Background(),
+		context: context.Background(),
 	}
 }
 
@@ -57,13 +46,13 @@ type FastSearchResult struct {
 	AnimegoID  string `json:"animego_id"`
 }
 
-type JsonResponse struct {
+type ABJsonResponse struct {
 	Status  string `json:"status"`
 	Content string `json:"content"`
 	Message string `json:"message,omitempty"`
 }
 
-func (jr *JsonResponse) Decode(r io.Reader) error {
+func (jr *ABJsonResponse) Decode(r io.Reader) error {
 	if err := json.NewDecoder(r).Decode(&jr); err != nil {
 		return err
 	}
@@ -94,7 +83,7 @@ type OtherAnimeInfo struct {
 	OriginalManga  string   `json:"manga"`
 	Studio         string   `json:"studio"`
 }
-type SearchResult struct {
+type ABSearchResult struct {
 	Title        string            `json:"title"`
 	OtherTitle   []string          `json:"other_title"`
 	Status       string            `json:"status"`
@@ -134,16 +123,16 @@ func (ab *AniboomParser) FastSearch(title string) ([]*FastSearchResult, error) {
 		"Referer":          domain,
 	}
 
-	response, err := t.RequestWithContext(ab.Context, "GET", URL, params, headers, true, &JsonResponse{})
+	response, err := t.RequestWithContext(ab.context, "GET", URL, params, headers, true, &ABJsonResponse{})
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
 
-	json_response, ok := response.Json.(*JsonResponse)
+	json_response, ok := response.Json.(*ABJsonResponse)
 	if !ok {
-		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *JsonResponse"
+		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *ABJsonResponse"
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
@@ -224,16 +213,16 @@ func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
 		"X-Requested-With": "XMLHttpRequest",
 	}
 
-	response, err := t.RequestWithContext(ab.Context, "GET", link, params, headers, true, &JsonResponse{})
+	response, err := t.RequestWithContext(ab.context, "GET", link, params, headers, true, &ABJsonResponse{})
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
 
-	json_response, ok := response.Json.(*JsonResponse)
+	json_response, ok := response.Json.(*ABJsonResponse)
 	if !ok {
-		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *JsonResponse"
+		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *ABJsonResponse"
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
@@ -317,15 +306,15 @@ func (ab *AniboomParser) EpisodesInfo(link string) ([]*EpisodeInfo, error) {
 //
 // :title: Название
 //
-// Возвращает срез ссылок на SearchResult
-func (ab *AniboomParser) Search(title string) ([]*SearchResult, error) {
+// Возвращает срез ссылок на ABSearchResult
+func (ab *AniboomParser) Search(title string) ([]*ABSearchResult, error) {
 	elements, err := ab.FastSearch(title)
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : search : FastSearch не смог найти данные для title %s. Ошибка: %v", title, err)
 		log.Println(error_message)
 		return nil, err
 	}
-	res := make([]*SearchResult, 0)
+	res := make([]*ABSearchResult, 0)
 	for _, anime := range elements {
 		anime_indirect := *anime
 		c_data, err := ab.AnimeInfo(anime_indirect.Link)
@@ -345,10 +334,10 @@ func (ab *AniboomParser) Search(title string) ([]*SearchResult, error) {
 
 :link: Ссылка на страницу (прим: https:animego.me/anime/volchica-i-pryanosti-torgovec-vstrechaet-mudruyu-volchicu-2546)
 
-Возвращает модель SearchResult
+Возвращает модель ABSearchResult
 */
-func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
-	var c_data SearchResult
+func (ab *AniboomParser) AnimeInfo(link string) (*ABSearchResult, error) {
+	var c_data ABSearchResult
 
 	// request, err := http.NewRequestWithContext(ab.Context, "GET", link, nil)
 	// if err != nil {
@@ -363,7 +352,7 @@ func (ab *AniboomParser) AnimeInfo(link string) (*SearchResult, error) {
 		"Referer": URL,
 	}
 
-	response, err := t.RequestWithContext(ab.Context, "GET", link, nil, headers, false, nil)
+	response, err := t.RequestWithContext(ab.context, "GET", link, nil, headers, false, nil)
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
@@ -565,16 +554,16 @@ func (ab *AniboomParser) GetTranslationsInfo(animego_id string) ([]*Translation,
 
 	URL := fmt.Sprintf("https://%s/anime/%s/player?", ab.dmn, animego_id)
 
-	response, err := t.RequestWithContext(ab.Context, "GET", URL, params, headers, true, &JsonResponse{})
+	response, err := t.RequestWithContext(ab.context, "GET", URL, params, headers, true, &ABJsonResponse{})
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
 
-	json_response, ok := response.Json.(*JsonResponse)
+	json_response, ok := response.Json.(*ABJsonResponse)
 	if !ok {
-		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *JsonResponse"
+		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *ABJsonResponse"
 		log.Println(error_message)
 		return nil, errs.NewServiceError(error_message)
 	}
@@ -687,16 +676,16 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 
 	URL := fmt.Sprintf("https://%s/anime/%s/player", ab.dmn, animego_id)
 
-	response, err := t.RequestWithContext(ab.Context, "GET", URL, params, headers, true, &JsonResponse{})
+	response, err := t.RequestWithContext(ab.context, "GET", URL, params, headers, true, &ABJsonResponse{})
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
 		return "", errs.NewServiceError(error_message)
 	}
 
-	json_response, ok := response.Json.(*JsonResponse)
+	json_response, ok := response.Json.(*ABJsonResponse)
 	if !ok {
-		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *JsonResponse"
+		error_message := "Aniboom parser error : FastSearch : не смог привести result.Json к *ABJsonResponse"
 		log.Println(error_message)
 		return "", errs.NewServiceError(error_message)
 	}
@@ -781,7 +770,7 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 		"Referer": referer,
 	}
 
-	response, err := t.RequestWithContext(ab.Context, "GET", embed_link, params, headers, false, nil)
+	response, err := t.RequestWithContext(ab.context, "GET", embed_link, params, headers, false, nil)
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : FastSearch : RequestWithContext вернул ошибку: %v", err)
 		log.Println(error_message)
@@ -948,7 +937,7 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 		"Referer": referer,
 	}
 
-	response, err := t.RequestWithContext(ab.Context, "GET", media_src, nil, headers, false, nil)
+	response, err := t.RequestWithContext(ab.context, "GET", media_src, nil, headers, false, nil)
 
 	fmt.Println(html.UnescapeString(string(response.Data)))
 
@@ -962,14 +951,14 @@ func (ab *AniboomParser) get_mpd_playlist(embed_link, translation string, episod
 		filename := media_src[lastSlashIndex+1 : lastDotIndex]
 
 		server_path := media_src[:lastDotIndex]
-		str_playlist = strings.Replace(str_playlist, filename, server_path, -1)
+		str_playlist = strings.Replace(str_playlist, filename, server_path, 1)
 	} else {
 		lastSubstrIndex := strings.LastIndex(media_src, "master_device.m3u8")
 		if lastSubstrIndex == -1 {
 			return "", errors.New("master_device.m3u8 не найден в media_src")
 		}
 		server_path := media_src[:lastSubstrIndex]
-		str_playlist = strings.Replace(str_playlist, "media_", server_path+"media_", -1)
+		str_playlist = strings.Replace(str_playlist, "media_", server_path+"media_", 1)
 	}
 	return str_playlist, nil
 }
