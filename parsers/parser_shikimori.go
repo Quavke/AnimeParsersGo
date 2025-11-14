@@ -7,7 +7,6 @@ import (
 	"html"
 	"io"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -90,17 +89,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 	content := json_response.Content
 
 	htmlContent := html.UnescapeString(content)
-	file, err := os.Create("index.html")
-	if err != nil {
-		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
-		return nil, err
-	}
-	defer file.Close()
 
-	if _, err := file.WriteString(htmlContent); err != nil {
-		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
-		return nil, err
-	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Shikimori parser error : Search : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -149,7 +138,6 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 			c_data.Poster = strings.Replace(poster, " 2x", "", 1)
 		}
 
-		//FIXME
 		info := s.Find("div.info").First()
 		original_title, exists := info.Find("div.name").First().Find("a").First().Attr("title")
 		if !exists || original_title == "" {
