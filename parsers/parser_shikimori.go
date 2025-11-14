@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"strings"
@@ -88,9 +87,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 
 	content := json_response.Content
 
-	htmlContent := html.UnescapeString(content)
-
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
 	if err != nil {
 		error_message := fmt.Sprintf("Shikimori parser error : Search : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
 		log.Println(error_message)
@@ -161,7 +158,6 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 				log.Println(error_message)
 				return
 			}
-			log.Println(type_)
 			c_data.Type = type_
 
 			div_status_tag := value.Find("div.b-anime_status_tag")
