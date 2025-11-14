@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -89,6 +90,17 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 	content := json_response.Content
 
 	htmlContent := html.UnescapeString(content)
+	file, err := os.Create("index.html")
+	if err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
+		return nil, err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(htmlContent); err != nil {
+		log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
+		return nil, err
+	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Shikimori parser error : Search : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -128,7 +140,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 
 		image := s.Find("div.image").First()
 		if image.Length() != 0 {
-			poster, exists := image.Find("picture").First().Find("a").First().Attr("srcset")
+			poster, exists := image.Find("picture").First().Find("img").First().Attr("srcset")
 			if !exists || poster == "" {
 				error_message := "Shikimori parser error : Search : goquery не смог найти атрибут srcset в контейнере с классом b-db_entry-variant-list_item в div.image"
 				log.Println(error_message)
@@ -137,8 +149,9 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 			c_data.Poster = strings.Replace(poster, " 2x", "", 1)
 		}
 
-		info := doc.Find("div.info").First()
-		original_title, exists := info.Find("name").First().Find("a").First().Attr("title")
+		//FIXME
+		info := s.Find("div.info").First()
+		original_title, exists := info.Find("div.name").First().Find("a").First().Attr("title")
 		if !exists || original_title == "" {
 			error_message := "Shikimori parser error : Search : goquery не смог найти атрибут title в контейнере с классом b-db_entry-variant-list_item в div.info"
 			log.Println(error_message)
@@ -146,7 +159,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 		}
 		c_data.OriginalTitle = original_title
 
-		title := strings.Split(info.Find("name").First().Find("a").First().Text(), "/")[0]
+		title := strings.Split(info.Find("div.name").First().Find("a").First().Text(), "/")[0]
 		c_data.Title = title
 
 		if info.Find("div.line").First().Find("div.key").First().Text() == "Тип:" {
