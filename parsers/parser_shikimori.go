@@ -155,12 +155,13 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 
 			b_tag := value.Find("div.b-tag")
 
-			type_ := b_tag.Text()
+			type_ := b_tag.First().Text()
 			if type_ == "" {
 				error_message := fmt.Sprintf("Shikimori parser error : Search : goquery не смог текст в контейнере с классом b-db_entry-variant-list_item в div.info в div.line:div.value:div.b-tag. Ошибка: %v", err)
 				log.Println(error_message)
 				return
 			}
+			log.Println(type_)
 			c_data.Type = type_
 
 			div_status_tag := value.Find("div.b-anime_status_tag")
