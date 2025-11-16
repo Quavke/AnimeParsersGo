@@ -47,6 +47,27 @@ type SHSearchResult struct {
 	Year          string   `json:"year"`
 }
 
+type SHAnimeInfoResult struct {
+	Dates           string   `json:"dates"`
+	Description     string   `json:"description"`
+	EpisodeDuration string   `json:"episode_duration"`
+	Episodes        string   `json:"episodes"`
+	Genres          []string `json:"genres"`
+	Licensed        string   `json:"licensed"`
+	LicensedInRU    string   `json:"licensed_in_ru"`
+	NextEpisode     string   `json:"next_episode"`
+	OriginalTitle   string   `json:"original_title"`
+	Picture         string   `json:"picture"`
+	PremiereInRU    string   `json:"premiere_in_ru"`
+	Rating          string   `json:"rating"`
+	Score           string   `json:"score"`
+	Status          string   `json:"status"`
+	Studio          string   `json:"studio"`
+	Themes          []string `json:"themes"`
+	Title           string   `json:"title"`
+	Type            string   `json:"type"`
+}
+
 type SHJsonResponse struct {
 	Content string `json:"content"`
 }
@@ -58,6 +79,11 @@ func (jr *SHJsonResponse) Decode(r io.Reader) error {
 	return nil
 }
 
+// Быстрый поиск аниме по названию (ограничено по количеству результатов).
+//
+// :title: название аниме
+//
+// Возвращает список ссылок на SHSearchResult
 func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 	headers := models.Headers{
 		"User-Agent":       "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
@@ -100,8 +126,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 		c_data := &SHSearchResult{}
 		data_type, exists := s.Attr("data-type")
 		if !exists || data_type == "" {
-			error_message := "Shikimori parser error : Search : goquery не смог найти атрибут data-type в контейнере с классом b-db_entry-variant-list_item"
-			log.Println(error_message)
+			log.Println("Shikimori parser error : Search : goquery не смог найти атрибут data-type в контейнере с классом b-db_entry-variant-list_item")
 			return
 		}
 		if data_type != "anime" {
@@ -110,16 +135,14 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 
 		link, exists := s.Attr("data-url")
 		if !exists || link == "" {
-			error_message := "Shikimori parser error : Search : goquery не смог найти атрибут data-url в контейнере с классом b-db_entry-variant-list_item"
-			log.Println(error_message)
+			log.Println("Shikimori parser error : Search : goquery не смог найти атрибут data-url в контейнере с классом b-db_entry-variant-list_item")
 			return
 		}
 		c_data.Link = link
 
 		sh_id, exists := s.Attr("data-id")
 		if !exists || sh_id == "" {
-			error_message := "Shikimori parser error : Search : goquery не смог найти атрибут data-id в контейнере с классом b-db_entry-variant-list_item"
-			log.Println(error_message)
+			log.Println("Shikimori parser error : Search : goquery не смог найти атрибут data-id в контейнере с классом b-db_entry-variant-list_item")
 			return
 		}
 		c_data.ShikimoriID = sh_id
@@ -128,8 +151,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 		if image.Length() != 0 {
 			poster, exists := image.Find("picture").First().Find("img").First().Attr("srcset")
 			if !exists || poster == "" {
-				error_message := "Shikimori parser error : Search : goquery не смог найти атрибут srcset в контейнере с классом b-db_entry-variant-list_item в div.image"
-				log.Println(error_message)
+				log.Println("Shikimori parser error : Search : goquery не смог найти атрибут srcset в контейнере с классом b-db_entry-variant-list_item в div.image")
 				return
 			}
 			c_data.Poster = strings.Replace(poster, " 2x", "", 1)
@@ -138,8 +160,7 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 		info := s.Find("div.info").First()
 		original_title, exists := info.Find("div.name").First().Find("a").First().Attr("title")
 		if !exists || original_title == "" {
-			error_message := "Shikimori parser error : Search : goquery не смог найти атрибут title в контейнере с классом b-db_entry-variant-list_item в div.info"
-			log.Println(error_message)
+			log.Println("Shikimori parser error : Search : goquery не смог найти атрибут title в контейнере с классом b-db_entry-variant-list_item в div.info")
 			return
 		}
 		c_data.OriginalTitle = original_title
@@ -193,4 +214,100 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 	})
 
 	return res, nil
+}
+
+func (sh *ShikimoriParser) AnimeInfo(shikimori_link string) (*SHAnimeInfoResult, error) {
+	result := &SHAnimeInfoResult{
+		Genres: make([]string, 0),
+		Themes: make([]string, 0),
+	}
+
+	headers := models.Headers{
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+	}
+
+	resp, err := t.RequestWithContext(sh.context, "GET", shikimori_link, nil, headers, false, nil)
+	if err != nil {
+		error_message := fmt.Sprintf("Shikimori parser error : AnimeInfo : RequestWithContext вернул ошибку: %v", err)
+		log.Println(error_message)
+		return nil, errs.NewServiceError(error_message)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(resp.Data)))
+	if err != nil {
+		error_message := fmt.Sprintf("Shikimori parser error : AnimeInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
+		log.Println(error_message)
+		return nil, errs.NewServiceError(error_message)
+	}
+	title := strings.Split(doc.Find("header.head").First().Find("h1").First().Text(), " / ")
+	result.Title = title[0]
+	result.OriginalTitle = title[1]
+
+	picture := doc.Find("picture").First()
+	if picture.Length() > 0 {
+		srcset, exists := picture.Find("img").First().Attr("srcset")
+		if !exists || srcset == "" {
+			error_message := "Shikimori parser error : AnimeInfo : в picture:img не было найдено атрибута srcset"
+			log.Println(error_message)
+			return nil, errs.NewServiceError(error_message)
+		}
+		result.Picture = strings.Replace(srcset, " 2x", "", 1)
+	}
+
+	info := doc.Find("div.c-info-left").First().Find("div.block").First()
+	info.Find("div.line").Each(func(i int, s *goquery.Selection) {
+		key := s.Find("div.key").First().Text()
+		value := s.Find("div.value").First()
+		value_text := value.Text()
+		value_span := value.Find("span").First()
+
+		switch key {
+		case "Тип:":
+			result.Type = value_text
+		case "Эпизоды:":
+			result.Episodes = value_text
+		case "Следующий эпизод:":
+			next_episode, exists := value_span.Attr("data-datetime")
+			if !exists || next_episode == "" {
+				log.Println("Shikimori parser error : AnimeInfo : goquery не смог найти атрибут data-datetime в div.c-info-left:div.line:span")
+				return
+			}
+			result.NextEpisode = next_episode
+		case "Длительность эпизода:":
+			result.EpisodeDuration = value_text
+		case "Статус:":
+			status, exists := value_span.Attr("data-text")
+			if !exists || status == "" {
+				log.Println("Shikimori parser error : AnimeInfo : goquery не смог найти атрибут data-text в div.c-info-left:div.line:span")
+				return
+			}
+			result.Status = status
+
+			value_all_spans := value.Find("span")
+
+			if value_all_spans.Length() > 1 {
+				result.Dates = value_all_spans.Last().Text()
+			} else {
+				result.Dates = strings.TrimSpace(value_text)
+			}
+		case "Жанры:":
+			for _, genre := range value.Find("span.genre-ru").EachIter() {
+				result.Genres = append(result.Genres, genre.Text())
+			}
+		case "Темы:", "Тема:":
+			for _, theme := range value.Find("span.genre-ru").EachIter() {
+				result.Themes = append(result.Themes, theme.Text())
+			}
+		case "Рейтинг:":
+			result.Rating = value_text
+		case "Лицензировано:":
+			result.Licensed = value_text
+		case "Лицензировано в РФ под названием:":
+			result.LicensedInRU = value_text
+		case "Премьера в РФ":
+			result.PremiereInRU = value_text
+		}
+	})
+
+	return result, nil
 }
