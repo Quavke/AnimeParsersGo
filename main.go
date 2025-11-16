@@ -34,6 +34,15 @@ func shikimori_test(title string) {
 	for _, v := range result {
 		fmt.Printf("Search: %+v\n\n", *v)
 	}
+	first_res := *result[8]
+	anime_info, err := ShikimoriParser.AnimeInfo(first_res.Link)
+	if err != nil {
+		fmt.Printf("AnimeInfo вернул ошибку: %v", err)
+		return
+	}
+
+	fmt.Printf("AnimeInfo: %+v\n\n", *anime_info)
+
 }
 
 func aniboom_test() {

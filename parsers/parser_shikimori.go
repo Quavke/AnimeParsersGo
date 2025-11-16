@@ -216,6 +216,11 @@ func (sh *ShikimoriParser) Search(title string) ([]*SHSearchResult, error) {
 	return res, nil
 }
 
+// Получение данных по аниме парсингом.
+//
+// :shikimori_link: ссылка на страницу шикимори с информацией (прим: https://shikimori.one/animes/z20-naruto)
+//
+// Возвращает ссылку на SHAnimeInfoResult:
 func (sh *ShikimoriParser) AnimeInfo(shikimori_link string) (*SHAnimeInfoResult, error) {
 	result := &SHAnimeInfoResult{
 		Genres: make([]string, 0),

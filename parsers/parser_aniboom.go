@@ -339,13 +339,6 @@ func (ab *AniboomParser) Search(title string) ([]*ABSearchResult, error) {
 func (ab *AniboomParser) AnimeInfo(link string) (*ABSearchResult, error) {
 	var c_data ABSearchResult
 
-	// request, err := http.NewRequestWithContext(ab.Context, "GET", link, nil)
-	// if err != nil {
-	// 	error_message := fmt.Sprintf("Aniboom parser error : AnimeInfo : не смог создать request. Ошибка: %v", err)
-	// 	log.Println(error_message)
-	// 	return nil, errs.NewServiceError(error_message)
-	// }
-
 	URL := fmt.Sprintf("https://%s/search/all?q=anime", ab.dmn)
 
 	headers := models.Headers{
@@ -698,17 +691,7 @@ func (ab *AniboomParser) get_embed_link(animego_id string) (string, error) {
 	}
 
 	htmlContent := html.UnescapeString(json_response.Content)
-	// file, err := os.Create("index.html")
-	// if err != nil {
-	// 	log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог создать файл")
-	// 	return "", err
-	// }
-	// defer file.Close()
 
-	// if _, err := file.WriteString(htmlContent); err != nil {
-	// 	log.Println("Aniboom parser error : GetAsFile : GetMPDPlaylist не смог записать данные в файл")
-	// 	return "", err
-	//}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		error_message := fmt.Sprintf("Aniboom parser error : get_embed_link : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
@@ -781,7 +764,7 @@ func (ab *AniboomParser) get_embed(embed_link, translation string, episode int) 
 	return bodyText, nil
 }
 
-// :embed_link: ссылка на embed (можно получить из _get_embed_link)
+// :embed_link: ссылка на embed (можно получить из get_embed_link)
 //
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 //
@@ -875,7 +858,7 @@ func (ab *AniboomParser) get_media_server_from_src(media_str string) (string, er
 
 // Получение файла mpd через embed_link
 //
-// :embed_link: ссылка на embed (можно получить из _get_embed_link)
+// :embed_link: ссылка на embed (можно получить из get_embed_link)
 // :episode: Номер эпизода (вышедшего) (Если фильм - 0)
 // :translation: id перевода (который именно для aniboom плеера) (можно получить из GetTranslationsInfo)
 //
