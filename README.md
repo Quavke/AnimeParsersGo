@@ -38,16 +38,16 @@ func main() {
     parser := parsers.NewAniboomParser("animego.org")
     
     // Ищем аниме
-    results, err := parser.FastSearch("Врата Штейна 0")
+    results, err := parser.FastSearch("Поднятие уровня в одиночку")
     if err != nil {
         panic(err)
     }
     
     // Выводим результаты
     for _, anime := range results {
-        fmt.Printf("Название: %s\n", anime.Title)
-        fmt.Printf("Ссылка: %s\n", anime.Link)
-        fmt.Printf("ID: %s\n\n", anime.AnimegoID)
+        fmt.Printf("Название: %s\n", *anime.Title)
+        fmt.Printf("Ссылка: %s\n", *anime.Link)
+        fmt.Printf("ID: %s\n\n", *anime.AnimegoID)
     }
 }
 ```
