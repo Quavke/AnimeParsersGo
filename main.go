@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/Quavke/AnimeParsersGo/parsers"
@@ -26,23 +27,34 @@ func main() {
 
 func shikimori_test(title string) {
 	ShikimoriParser := parsers.NewShikimoriParser("")
-	result, err := ShikimoriParser.Search(title)
+	// result, err := ShikimoriParser.Search(title)
+	// if err != nil {
+	// 	fmt.Printf("Search вернул ошибку: %v", err)
+	// 	return
+	// }
+	// for _, v := range result {
+	// 	fmt.Printf("Search: %+v\n\n", *v)
+	// }
+	// first_res := *result[0]
+	// anime_info, err := ShikimoriParser.AnimeInfo(first_res.Link)
+	// if err != nil {
+	// 	fmt.Printf("AnimeInfo вернул ошибку: %v", err)
+	// 	return
+	// }
+
+	// fmt.Printf("AnimeInfo: %+v\n\n", *anime_info)
+
+	info, err := ShikimoriParser.AdditionalAnimeInfo("https://shikimori.one/animes/60303-shinjiteita-nakama-tachi-ni-dungeon-okuchi-de-korosarekaketa-ga-gift-mugen-gacha-de-level-9999-no-nakama-tachi-wo-te-ni-irete-moto-party-member-to-sekai-ni-fukushuu-zamaa-shimasu")
 	if err != nil {
-		fmt.Printf("Search вернул ошибку: %v", err)
+		fmt.Printf("AdditionalAnimeInfo вернул ошибку: %v", err)
 		return
 	}
-	for _, v := range result {
-		fmt.Printf("Search: %+v\n\n", *v)
-	}
-	first_res := *result[8]
-	anime_info, err := ShikimoriParser.AnimeInfo(first_res.Link)
+	bts, err := json.Marshal(info)
 	if err != nil {
-		fmt.Printf("AnimeInfo вернул ошибку: %v", err)
+		fmt.Printf("Marshal вернул ошибку: %v", err)
 		return
 	}
-
-	fmt.Printf("AnimeInfo: %+v\n\n", *anime_info)
-
+	fmt.Println(string(bts))
 }
 
 func aniboom_test() {

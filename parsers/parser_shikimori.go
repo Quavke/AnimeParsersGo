@@ -1,12 +1,14 @@
 package parsers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	errs "github.com/Quavke/AnimeParsersGo/errors"
@@ -66,6 +68,46 @@ type SHAnimeInfoResult struct {
 	Themes          []string `json:"themes"`
 	Title           string   `json:"title"`
 	Type            string   `json:"type"`
+}
+
+type SHRelated struct {
+	Date     string `json:"date"`
+	Name     string `json:"name"`
+	Picture  string `json:"picture"`
+	Relation string `json:"relation"`
+	Type     string `json:"type"`
+	Url      string `json:"url"`
+}
+
+type SHStaff struct {
+	Name  string   `json:"name"`
+	Roles []string `json:"roles"`
+	Link  string   `json:"link"`
+}
+
+type SHMainCharacters struct {
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+}
+
+type SHVideos struct {
+	Name string `json:"name"`
+	Link string `json:"link"`
+}
+
+type SHSimilar struct {
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+	Link    string `json:"link"`
+}
+
+type SHAdditionalAnimeInfo struct {
+	Related        []*SHRelated        `json:"related"`
+	Staff          []*SHStaff          `json:"staff"`
+	MainCharacters []*SHMainCharacters `json:"main_characters"`
+	Screenshots    []string            `json:"screenshots"`
+	Videos         []*SHVideos         `json:"videos"`
+	Similar        []*SHSimilar        `json:"similar"`
 }
 
 type SHJsonResponse struct {
@@ -238,7 +280,7 @@ func (sh *ShikimoriParser) AnimeInfo(shikimori_link string) (*SHAnimeInfoResult,
 		return nil, errs.NewServiceError(error_message)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(resp.Data)))
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Data))
 	if err != nil {
 		error_message := fmt.Sprintf("Shikimori parser error : AnimeInfo : goquery не смог преобразовать ответ в документ. Ошибка: %v", err)
 		log.Println(error_message)
@@ -315,4 +357,210 @@ func (sh *ShikimoriParser) AnimeInfo(shikimori_link string) (*SHAnimeInfoResult,
 	})
 
 	return result, nil
+}
+
+//FIXME
+// Парсится только первое видео вместо всех четырех
+
+// Получение дополнительных данных об аниме.
+// Получаемые данные: связанные аниме (продолжение, предыстория, альтернативное и т.п.), Авторы (автор манги, режиссер), Главные герои, Скриншоты, Ролики, Похожее
+//
+// :shikimori_link: ссылка на страницу шикимори с информацией (прим: https://shikimori.one/animes/z20-naruto)
+//
+// Возвращает ссылку на SHAdditionalAnimeInfo
+func (sh *ShikimoriParser) AdditionalAnimeInfo(shikimori_link string) (*SHAdditionalAnimeInfo, error) {
+	var link string
+	r, _ := utf8.DecodeLastRuneInString(shikimori_link)
+	if r == '/' {
+		link = shikimori_link + "resources"
+	} else {
+		link = shikimori_link + "/resources"
+	}
+
+	headers := models.Headers{
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+	}
+
+	resp, err := t.RequestWithContext(sh.context, "GET", link, nil, headers, false, nil)
+	if err != nil {
+		error_message := fmt.Sprintf("Shikimori parser error : AdditionalAnimeInfo : RequestWithContext вернул ошибку: %v", err)
+		log.Println(error_message)
+		return nil, errs.NewServiceError(error_message)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Data))
+
+	res := &SHAdditionalAnimeInfo{
+		Related:        make([]*SHRelated, 0),
+		Staff:          make([]*SHStaff, 0),
+		MainCharacters: make([]*SHMainCharacters, 0),
+		Screenshots:    make([]string, 0),
+		Videos:         make([]*SHVideos, 0),
+		Similar:        make([]*SHSimilar, 0),
+	}
+
+	r1 := doc.Find("div.cc-related-authors").First()
+	r1.Find("div.c-column").Each(func(i int, s *goquery.Selection) {
+		col_type := s.Find("div.subheadline").First().Text()
+		switch col_type {
+		case "Связанное":
+			for _, entry := range s.Find("div.b-db_entry-variant-list_item").EachIter() {
+				c_data := &SHRelated{}
+				url, exists := entry.Attr("data-url")
+				if !exists || url == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут data-url в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item")
+					continue
+				}
+				c_data.Url = url
+
+				if entry.Find("picture").First().Length() > 0 {
+					picture, exists := entry.Find("picture").First().Find("img").First().Attr("srcset")
+					if !exists || picture == "" {
+						log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут srcset в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item:picture:img")
+						continue
+					}
+					c_data.Picture = strings.Replace(picture, " 2x", "", 1)
+				}
+				div_name := entry.Find("div.name").First()
+				if div_name.Length() == 0 {
+					continue
+				}
+				name_ru := div_name.Find("span.name-ru").First()
+				name_en := div_name.Find("span.name-en").First()
+				if name_ru.Length() > 0 {
+					c_data.Name = name_ru.Text()
+				} else if name_en.Length() > 0 {
+					c_data.Name = name_en.Text()
+				}
+
+				for _, other := range entry.Find("div.line").First().Find("div").EachIter() {
+					other_text := other.Text()
+					cls, exists := other.Attr("class")
+					if !exists || cls == "" {
+						log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут class в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item:div.line:div")
+						continue
+					}
+					if strings.Contains(cls, "b-anime_status_tag") {
+						c_data.Relation = other_text
+					} else if strings.Contains(cls, "linkeable") {
+						link, exists := other.Attr("data-href")
+						if !exists || cls == "" {
+							log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут data-href в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item:div.line:div")
+							continue
+						}
+						if strings.Contains(link, "/kind/") {
+							c_data.Type = other_text
+						} else if strings.Contains(link, "/season/") {
+							c_data.Date = other_text
+						}
+					}
+				}
+				if c_data.Type == "Клип" && c_data.Name == "" {
+					c_data.Name = entry.Find("div.name").First().Find("a").First().Text()
+				}
+
+				res.Related = append(res.Related, c_data)
+			}
+		case "Авторы":
+			for _, entry := range s.Find("div.b-db_entry-variant-list_item").EachIter() {
+				c_data := &SHStaff{
+					Roles: make([]string, 0),
+				}
+				link, exists := entry.Attr("data-url")
+				if !exists || link == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут data-url в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item")
+					continue
+				}
+				c_data.Link = link
+
+				name, exists := entry.Attr("data-text")
+				if !exists || name == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут data-text в div.cc-related-authors:div.c-column:div.subheadline:div.b-db_entry-variant-list_item")
+					continue
+				}
+				c_data.Name = name
+
+				for _, role := range entry.Find("div.line").First().Find("div.b-tag").EachIter() {
+					c_data.Roles = append(c_data.Roles, role.Text())
+				}
+				res.Staff = append(res.Staff, c_data)
+			}
+		}
+
+	})
+
+	r1 = doc.Find("div.c-characters").First()
+	if r1.Length() > 0 {
+		r1.Find("article").Each(func(i int, s *goquery.Selection) {
+			c_data := &SHMainCharacters{}
+			meta := s.Find("meta[itemprop=\"image\"]").First()
+			if meta.Length() > 0 {
+				picture, exists := meta.Attr("content")
+				if !exists || picture == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут content в div.c-characters:article:meta itemprop = \"image\"")
+					return
+				}
+				c_data.Picture = picture
+			}
+			if tmp := s.Find("span.name-ru").First(); tmp.Length() > 0 {
+				c_data.Name = tmp.Text()
+			}
+			res.MainCharacters = append(res.MainCharacters, c_data)
+		})
+	}
+
+	r1 = doc.Find("div.two-videos").First()
+	if r1.Length() > 0 {
+		if r1.Find("div.c-screenshots").First().Length() > 0 {
+			r1.Find("a.c-screenshot").Each(func(i int, s *goquery.Selection) {
+				href, exists := s.Attr("href")
+				if !exists || href == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут href в div.two-videos:div.c-screenshots:a.c-screenshot")
+					return
+				}
+				res.Screenshots = append(res.Screenshots, href)
+			})
+		}
+		if r1.Find("div.c-videos").First().Length() > 0 {
+			r1.Find("div.c-video").Each(func(i int, s *goquery.Selection) {
+				c_data := &SHVideos{}
+				link, exists := s.Find("a").First().Attr("href")
+				if !exists || link == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут href в div.two-videos:div.c-videos:div.c-video")
+					return
+				}
+				c_data.Link = link
+				if tmp := s.Find("span.name").First(); tmp.Length() > 0 {
+					c_data.Name = tmp.Text()
+				}
+				res.Videos = append(res.Videos, c_data)
+			})
+		}
+
+		r1 = doc.Find("div.block")
+		if r1.Length() > 0 {
+			r1.Find("article").Each(func(i int, s *goquery.Selection) {
+				c_data := &SHSimilar{}
+				img := s.Find("meta[itemprop=\"image\"]").First()
+				if img.Length() > 0 {
+					content, exists := img.Attr("content")
+					if !exists || content == "" {
+						log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут content в div.block:article:meta itemprop = \"image\"")
+						return
+					}
+					c_data.Picture = content
+				}
+				c_data.Name = s.Find("span.name-ru").First().Text()
+				link, exists := s.Find("div").First().Attr("data-href")
+				if !exists || link == "" {
+					log.Println("Shikimori parser error : AdditionalAnimeInfo : goquery не смог найти атрибут data-href в div.block:article:div")
+					return
+				}
+				c_data.Link = link
+				res.Similar = append(res.Similar, c_data)
+			})
+		}
+	}
+
+	return res, nil
 }
